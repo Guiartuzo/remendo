@@ -17,11 +17,23 @@ comments we rejected.
 
 Remendo is a **sibling to vybim**, not a mode inside it. An editor and a review
 cockpit have opposite defaults (blank buffer + cursor vs. a change loaded with
-comments queued), and we do not edit by hand anymore — so this is a new product
-in its own repo. It borrows vybim's two hardest-won pieces by **copying and
+comments queued), and hand-editing during review is now the exception rather than
+the job — so this is a new product in its own repo. When hand-editing *is* needed,
+it happens in whatever editor the reviewer already uses, not in Remendo. It borrows vybim's hardest-won pieces by **copying and
 diverging** (not a shared crate yet): the side-by-side diff renderer
-(`diff_view.rs` + `similar`) and the subprocess-orchestration patterns
-(`git.rs`'s spawn-wait-parse and `lsp/transport.rs`'s long-lived transport).
+(`diff_view.rs` + `similar`), the file tree (`file_tree.rs`), the
+syntax-highlighted viewport and buffer (`syntax.rs`, `buffer.rs`, the read-only
+parts of `pane.rs`), and the subprocess-orchestration patterns (`git.rs`'s
+spawn-wait-parse and `lsp/transport.rs`'s long-lived transport).
+
+**Why a terminal app and not a VSCode extension.** The interaction model is
+borrowed from VSCode's inline merge-conflict UI (see design.md §11), and an
+extension would inherit the editor, the tree and the highlighting for free — so
+this deserves an answer on the record. The reason is not technical: **not everyone
+on the team uses VSCode**, and a terminal application is the one surface everyone
+already has. Choosing the editor-agnostic surface is what makes this usable
+team-wide, and it is an independent argument for the TUI alongside the
+schema-enforcement one in design.md §10.
 
 ## What Changes
 
@@ -43,10 +55,20 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
   out-of-code fact the verdict rests on; then, after triage, **per-comment apply**
   turns with tools scoped to `Read,Edit` (no shell). Edits compose because each
   turn reads the working tree the previous turn wrote.
-- **Two-panel manual triage (rung 0 only).** Left: code + reviewer comment.
-  Right: Claude's verdict, justification, and declared dependencies. The human
-  accepts / rejects / edits each comment's prose, and approves a drafted reply for
-  each rejection before leaving triage. No auto modes in v0.
+- **Manual triage over a review map (rung 0 only).** A toggleable file tree of the
+  change (annotated with per-file comment counts and progress), the commented
+  document with the comment's line or range highlighted in place, and Claude's
+  verdict, justification and declared dependencies. The human accepts / rejects /
+  defers / marks-as-fixed-by-hand each comment, may edit a comment's prose, and
+  approves a drafted reply for each rejection before leaving triage. Deferral is
+  first-class, so triage ends at an explicit gate that reports what is still
+  undecided rather than when the last comment is reached. No auto modes in v0.
+- **Read-only code, deliberately.** The document pane is syntax highlighted but
+  not editable in v0: if a fix needs hand-writing, people fall back to the editor
+  they already know, and a second-rate editor inside a review tool competes with
+  that for no gain. A comment fixed by hand gets its own fate — resolved, no apply
+  turn, no confirm-diff — and the worktree is re-read so the fix reaches the
+  amend. Revisit only if real usage demands it.
 - **Confirm before write.** Each accepted comment's edit is shown as a
   confirm-diff (the file's **pre-turn snapshot** vs. Claude's edit) reusing the
   ported diff renderer, so the diff shows only that comment's change. On confirm
@@ -73,8 +95,10 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
 - `claude-driver`: The shared Claude Code subprocess contract — one resume-based
   session per change, permission-mode and tool/dir scoping, structured-output
   verdicts — that both triage and apply build on.
-- `comment-triage`: The verdict pass and the two-panel manual triage UI; the
-  verdict × human-decision model.
+- `comment-triage`: The per-file verdict pass and the manual triage surface — file
+  tree, read-only syntax-highlighted document pane with in-place comment
+  highlighting, verdict panel — plus the verdict × human-decision model, the
+  accept / reject / defer / fixed-by-hand fates, and the triage completion gate.
 - `fix-application`: Per-comment scoped apply via the resumed session, the
   snapshot-per-turn confirm-diff guard (reject restores the pre-turn snapshot),
   and worktree accumulation of confirmed edits.
@@ -96,10 +120,12 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
   diverge; extracting a shared `vybim-core` crate is deferred until the
   duplication actually hurts.
 - **Dependencies (anticipated)**: `crossterm` + `ratatui` (TUI), `similar`
-  (diff), `serde` + `serde_json` (Gerrit JSON + Claude stream-json/JSON output),
-  a **blocking** HTTP client (e.g. `ureq`, rustls) — deliberately **no `tokio`**;
+  (diff), `ropey` (buffer), `ignore` (file-tree walk), `tree-sitter` +
+  `tree-sitter-highlight` and the grammars we review in (syntax highlighting),
+  `serde` + `serde_json` (Gerrit JSON + Claude stream-json/JSON output), a
+  **blocking** HTTP client (e.g. `ureq`, rustls) — deliberately **no `tokio`**;
   the synchronous render loop stays synchronous and the network lives on a worker
-  thread.
+  thread. No `portable-pty`/`vt100`: v0 embeds no terminal.
 - **External dependencies**: the `claude` CLI (Claude Code) on `PATH`, verified
   at v2.1.220 to support the driving model this design needs (`--session-id` /
   `--resume` — including resuming a `plan` verdict session in `acceptEdits` with
@@ -113,6 +139,11 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
 ## Deferred (explicitly out of v0 scope)
 
 - Auto modes (semi-auto rung 1, full-auto rung 2). v0 is manual (rung 0) only.
+- **In-application code editing.** The document pane is read-only in v0 (see "Read
+  only code, deliberately" above). Ship first, watch how people actually work, and
+  add editing only if falling back to their own editor proves to be real friction.
+  Cheap to add later — `buffer.rs` ports with zero coupling, and `pane.rs`'s
+  edit machinery is the part v0 deliberately leaves behind.
 - Multi-file / cross-file refactors; conflict resolution between edits.
 - Comment threading beyond top-level unresolved comments.
 - Multi-change dashboards.
@@ -122,6 +153,6 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
 - Final **prose tuning** of the three prompts. Their roles, scoping, I/O
   contracts, and granularity (per comment for apply, per file for verdicts) are
   settled (see design.md §7 "Prompt contract"); only exact wording and how much
-  surrounding code each turn is shown remain (design.md §11).
+  surrounding code each turn is shown remain (design.md §12).
 - Batching a comment-dense file's comments into one apply turn — a localized cost
   optimization; v0 is uniformly one turn per comment.

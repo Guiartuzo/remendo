@@ -471,7 +471,168 @@ treat a CLI upgrade as something to re-probe rather than assume.
 the volume is now moot for v0, but the Gerrit layer stays the reusable core — it
 was needed under every option and remains the first thing to build.
 
-## 11. Open threads (next design tasks, not part of this change's build)
+## 11. The review surface
+
+### The model: VSCode's conflict UI, borrowed for its navigation
+
+The interaction model is VSCode's inline merge-conflict resolution — you are *in
+the file*, the decision comes to you spatially with a highlighted region and an
+action bar, and a keystroke carries you to the next one. That gesture is worth
+copying because reviewers already have the muscle memory.
+
+But it only half-transfers, and the seam is instructive:
+
+```
+   VSCode conflict                    Remendo
+   ───────────────                    ───────
+   decorated region in the file   →   the commented line/range      ✓ Phase 1
+   action bar per region          →   [a]ccept [r]eject [s]kip      ✓ Phase 1
+   n/p between conflicts          →   n/p between comments          ✓ Phase 1
+   two visible alternatives       →   confirm-diff                  ✓ PHASE 2
+   "accept current / incoming"    →   confirm / reject              ✓ PHASE 2
+```
+
+VSCode asks *"which of these two texts do I want?"* — both are on screen, so the
+choice is cheap. Phase 1 asks *"is this reviewer's complaint correct?"*, and at
+that moment **there is no second text**: the edit does not exist until Phase 2.
+The two-artifact half of the analogy lands on the confirm-diff, not on triage.
+
+So the analogy is split across the phase boundary — navigation in Phase 1,
+decision-between-texts in Phase 2. Both phases therefore share one spatial shell
+so the muscle memory carries across, even though the decision changes shape. This
+does **not** merge the phases; §3's two-phase rationale is unchanged.
+
+### Layout
+
+```
+┌─ FILES ────┬─ src/gerrit/response.rs ─────────────┬─ VERDICT 3/10 ────┐
+│ ▾ src/     │  16   fn strip_xssi(s: &str)->&str { │  ● AGREE   0.9    │
+│  ▾ gerrit/ │  17     if s.starts_with(")]}'") {   │                   │
+│   ●resp.rs │▌ 18       &s[5..]                    │  Byte-slicing a   │
+│    client  │▌ 19     } else { s }                 │  &str at a fixed  │
+│  ▸ triage/ │  20   }                              │  offset panics on │
+│  worktree  │                                      │  a char boundary. │
+│ ────────── │ ┌─ @rafa · lines 18-19 ────────────┐ │                   │
+│ ⌂/COMMIT_M │ │ this panics on a multi-byte char │ │  ⚠ rests on: —    │
+│ ⌂/PATCHSET │ │ — use strip_prefix               │ │                   │
+│ ────────── │ └──────────────────────────────────┘ │                   │
+│ 6 pending  │                                      │                   │
+└────────────┴──────────────────────────────────────┴───────────────────┘
+ [t]ree [a]ccept [r]eject [s]kip [m]ine [e]dit-prose [n]ext [p]rev
+```
+
+The centre pane is the **document** under review, which is polymorphic — that
+uniformity is what makes the pseudo-paths cheap:
+
+```
+  anchor              centre pane shows        highlight
+  ──────              ─────────────────        ─────────
+  src/foo.rs:18       the file                 line 18
+  src/foo.rs:18-24    the file                 the range
+  /COMMIT_MSG:7       the commit message       that line
+  /PATCHSET_LEVEL     a change-overview doc    (none — whole-change)
+```
+
+Phase 2 reuses the shell with the right pane replaced by the confirm-diff. The
+ported `diff_view.rs` is side-by-side, so the geometry when a diff is on screen is
+still open (§12).
+
+### Read-only, deliberately
+
+The centre pane is **syntax-highlighted but not editable** in v0. Editing was
+considered and deferred: if a fix really needs hand-writing, people fall back to
+the editor they already know, and building a second-rate editor inside a review
+tool competes with that for no gain. §1's "editing is the rare escape hatch"
+becomes "the escape hatch is your own editor, not ours."
+
+Consequences, all load-bearing:
+
+- **The port shrinks a lot.** `pane.rs`'s multi-caret, insert/delete/undo and
+  word-motion machinery — roughly two thirds of its 1716 lines — is not needed.
+  What comes over is the syntax-highlighted viewport, scrolling, `goto_line`
+  (which *is* "jump to this comment") and search. `buffer.rs` still comes over
+  whole: 448 lines, zero crate-internal deps, and its file loading and line
+  indexing are exactly what a read-only viewer needs.
+- **Reload becomes unconditionally safe.** With no in-app buffer to dirty, a file
+  changing on disk has no conflict to resolve — Remendo just re-reads it. Under an
+  editable pane this would have been a "keep yours / theirs / merge" UX.
+- **Comment prose editing is unaffected.** Editing a comment's text before it
+  feeds an apply turn is a one-line input (`minibuffer.rs`), not a code editor, and
+  stays in v0.
+
+### The escape hatch needs a fate
+
+Because the hand-fix now happens *outside* Remendo, none of the three existing
+fates describes it:
+
+```
+   You alt-tab to your editor, fix it, come back. The comment is...
+
+     reject?  → posts a rebuttal to a reviewer you agreed with        ✗
+     skip?    → left unresolved, though it is fixed in the patchset   ✗
+     accept?  → fires an apply turn to redo work already done         ✗
+```
+
+So there is a fourth fate, **FIXED BY HAND**: resolves the comment, issues no
+apply turn, shows no confirm-diff. It carries a hard requirement — Remendo must
+re-read the file from disk, or the external fix never reaches the amend.
+
+```
+  ACCEPTED + applied   → apply turn → confirm-diff → reply + unresolved:FALSE
+  REJECTED + reply     → no edit                   → reply + unresolved:TRUE
+  FIXED BY HAND        → your edit, no turn        → reply + unresolved:FALSE
+  SKIPPED              → nothing                   → omitted from the post
+```
+
+A stale confirm-diff is the one sharp edge: if the file changes on disk while a
+confirm-diff is on screen, that diff describes a snapshot that no longer matches
+the file, and confirming it would write the wrong thing. Detect and invalidate.
+
+### The tree is a review map, not a file browser
+
+`file_tree.rs` ports nearly free (357 lines, depends only on `theme`), but it is
+re-annotated — vybim's tree answers "what files exist", Remendo's answers "what
+still needs my attention":
+
+```
+   vybim tree (editor)        remendo tree (review)
+   ───────────────────        ─────────────────────
+   whole repo                 the change's files (toggle: whole worktree)
+   no annotations             per-file comment counts + triage state
+   open a file to edit        jump to that file's comments
+   —                          /COMMIT_MSG, /PATCHSET_LEVEL as pseudo-entries
+```
+
+### Skip means "revisit later"
+
+Skip is a first-class deferral, which turns triage from a linear pass into a work
+queue and forces two things §3's sketch did not have:
+
+- **Two kinds of "next".** Once anything is skipped, walking 1→N re-visits
+  decisions already made. Raw motion and next-*pending* are different motions.
+- **An explicit completion gate.** Triage cannot end by exhaustion — you can reach
+  the last comment with six still deferred. The gate is also where mid-triage
+  "not yet" silently becomes the SKIPPED fate's "not doing it", so it states what
+  is still undecided rather than closing over them quietly.
+
+```
+   ○ pending ──skip──▶ ○ still pending
+                              │
+                       "3 comments never decided — leave them untouched?"
+                              │
+                              ▼
+                       SKIPPED fate (nothing posted)
+```
+
+## 12. Open threads (next design tasks, not part of this change's build)
+
+> **See also `open-decisions.md`** in this change directory. It catalogues what is
+> *undefined rather than merely unbuilt* — the decisions that block the first
+> commit (Gerrit configuration, worktree topology), the ones where guessing ships
+> silently wrong behaviour (Gerrit thread semantics, comment provenance), and the
+> ones `config.yaml`'s own rules require but no artifact has done yet (trait
+> surfaces, error model). The threads listed *below* are the safe-to-discover
+> remainder.
 
 0. ~~Strategic GO/NO-GO (Z0–Z3).~~ **RESOLVED — Z3**, see §10.
 1. ~~Resume-across-permission-modes check.~~ **DONE** (verified against `claude`
@@ -485,3 +646,17 @@ was needed under every option and remains the first thing to build.
    implementation of `gerrit-client`.
 4. **Resumable review sessions** (worktree + a small state file) — a v1 nicety
    the worktree model already makes cheap.
+5. **Phase 2 panel geometry** (§11). `diff_view.rs` is side-by-side and wants the
+   width; Phase 1 already spends it on tree + document + verdict. Options: keep the
+   geometry fixed and render a *unified* diff in the right pane (gives up the
+   ported renderer); let the geometry change per phase (keeps side-by-side, the
+   view visibly transforms); or a cramped three-pane at 80 columns. Leaning toward
+   letting it change, so the shape shift signals that confirming now writes.
+6. **`n` semantics with deferrals in play** (§11) — whether raw motion and
+   next-pending are separate keys, and whether either crosses file boundaries or
+   stops at the end of a file.
+7. **Does the tree filter or jump?** Selecting a file in the tree could scope the
+   triage queue to that file, or simply scroll a global queue to its first comment.
+8. **Reply drafts for hand-fixed comments** (§11). "Fixed in ps5, though I did it
+   differently" is a real case, and the one-batched-post model supports
+   resolve-with-reply natively — but whether to *offer* the draft is unsettled.

@@ -11,6 +11,26 @@ context: |
   Development is SPEC-ANCHORED: every change has proposal/design/specs/tasks under
   openspec/, and implementation follows the spec. Do not implement ahead of spec.
 
+  === Out-of-code facts (things the code cannot tell you) ===
+  Recorded deliberately: a dry run found that adjudication quality is limited less
+  by code reading than by context absent from the code, and that the resulting
+  wrong answers read as confident. Add to this list whenever such a fact is
+  settled.
+  - TERMINAL, NOT A VSCODE EXTENSION. The UI model is borrowed from VSCode's
+    inline merge-conflict resolution, and an extension would inherit the editor,
+    tree and highlighting for free. We do not build one because NOT EVERYONE ON
+    THE TEAM USES VSCODE; a terminal app is the one surface everyone has. This is
+    a team fact, not a technical one — it will not be rediscoverable from the code.
+  - READ-ONLY CODE PANE in v0. In-app editing is deferred, not forgotten: if a fix
+    needs hand-writing, people fall back to the editor they already know. Revisit
+    only if day-to-day use shows that fallback is real friction.
+  - CLAUDE CLI IS PINNED at v2.1.220. The result-envelope shape,
+    `structured_output`, `--tools`, inline `--json-schema` and
+    resume-across-permission-modes are CLI surface, NOT a stable API. Re-probe on
+    upgrade; do not assume from documentation or memory.
+  - GERRIT AUTH is still undecided (cookie / HTTP password / .netrc) — pin it
+    during `gerrit-client` implementation.
+
   === Code style ===
   - Functions: 4–20 lines. Split if longer.
   - Files: under 500 lines. Split by responsibility (SRP: one responsibility per
