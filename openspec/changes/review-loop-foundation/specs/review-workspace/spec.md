@@ -34,12 +34,12 @@ out into that worktree.
 
 ### Requirement: Abort leaves the worktree intact
 When the user aborts a review before finalizing, the application SHALL leave the
-dedicated worktree in place with any staged-but-unpushed edits, and SHALL NOT
+dedicated worktree in place with any confirmed-but-unpushed edits, and SHALL NOT
 push anything or modify the user's real working tree. The application SHALL report
 where the worktree is so the review can be resumed or the worktree removed.
 
 #### Scenario: Aborting mid-review preserves work and pushes nothing
-- **WHEN** the user aborts after some edits have been staged in the worktree but
-  before finalizing
-- **THEN** no patchset is pushed, the worktree and its staged edits are left in
+- **WHEN** the user aborts after some edits have been confirmed in the worktree
+  but before finalizing
+- **THEN** no patchset is pushed, the worktree and its confirmed edits are left in
   place, and the worktree location is reported

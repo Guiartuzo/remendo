@@ -20,27 +20,59 @@ comment observes the edits already confirmed for earlier comments.
   changed
 - **THEN** the later turn operates on the already-changed contents
 
+### Requirement: Each apply turn is preceded by a file snapshot
+Before issuing an apply turn, the application SHALL snapshot the current contents
+of the file that turn will edit. This **pre-turn snapshot** — not the patchset
+baseline — is the reference point for both that turn's confirm-diff and its
+revert-on-reject. For the first accepted comment in a given file the snapshot
+equals the patchset baseline; for every later comment in that file it includes the
+edits already confirmed for earlier comments.
+
+#### Scenario: Snapshot is taken before the turn runs
+- **WHEN** an apply turn is about to be issued for an accepted comment
+- **THEN** the current contents of that comment's file are captured as the turn's
+  pre-turn snapshot
+
+#### Scenario: Second comment in a file snapshots the confirmed state
+- **WHEN** an apply turn is issued for a comment in a file that already has a
+  confirmed edit from an earlier comment
+- **THEN** the pre-turn snapshot contains that earlier confirmed edit
+
 ### Requirement: Confirm-diff before any write is kept
-The application SHALL present each comment's proposed edit as a diff between the
-patchset baseline and Claude's edit, and SHALL require explicit user confirmation
-before the edit is kept. Nothing SHALL become part of the pushed patchset without
-confirmation.
+The application SHALL present each comment's proposed edit as a diff between that
+turn's **pre-turn snapshot** and Claude's edit, so the diff shows only the change
+attributable to the comment under review, and SHALL require explicit user
+confirmation before the edit is kept. Nothing SHALL become part of the pushed
+patchset without confirmation.
 
 #### Scenario: Edit is shown before it is kept
 - **WHEN** an apply turn produces an edit for a comment
-- **THEN** the edit is shown as a patchset-vs-edit diff and is not kept until the
+- **THEN** the edit is shown as a snapshot-vs-edit diff and is not kept until the
   user confirms it
 
-### Requirement: Rejecting an edit reverts the file
-The application SHALL restore the affected file to its patchset-baseline contents
-when the user rejects a proposed edit, since an apply turn writes to the worktree
-directly. After a revert the user MAY re-run the apply turn for that comment with
-an added hint, or skip the comment.
+#### Scenario: Confirm-diff excludes earlier confirmed edits
+- **WHEN** the confirm-diff is shown for a comment in a file that an earlier
+  confirmed comment already changed
+- **THEN** the diff shows only the current turn's change, not the earlier
+  confirmed edit
+
+### Requirement: Rejecting an edit restores the pre-turn snapshot
+The application SHALL restore the affected file to that turn's **pre-turn
+snapshot** when the user rejects a proposed edit, since an apply turn writes to
+the worktree directly. Restoring the patchset baseline instead would discard edits
+already confirmed for earlier comments in the same file, so reject SHALL NOT be
+implemented as `git checkout -- <file>`. After a revert the user MAY re-run the
+apply turn for that comment with an added hint, or skip the comment.
 
 #### Scenario: Rejected edit is reverted
 - **WHEN** the user rejects a proposed edit
-- **THEN** the affected file is restored to its patchset-baseline contents and the
+- **THEN** the affected file is restored to that turn's pre-turn snapshot and the
   edit does not appear in any later diff or the final patchset
+
+#### Scenario: Reject preserves earlier confirmed edits in the same file
+- **WHEN** the user rejects an edit for a comment in a file that an earlier
+  confirmed comment already changed
+- **THEN** the earlier confirmed edit remains in the worktree
 
 #### Scenario: Re-run after reject refines the edit
 - **WHEN** the user rejects an edit and re-runs the apply turn with an added hint
