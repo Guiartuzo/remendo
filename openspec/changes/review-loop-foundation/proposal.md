@@ -31,30 +31,34 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
   touched, so aborting mid-review is a non-event: the worktree is simply left in
   place (nothing pushed, nothing lost).
 - **Gerrit REST over a worker thread — no async runtime.** All Gerrit access
-  (fetch change + files, fetch unresolved comments, mark resolved, post replies)
+  (fetch change + files, fetch unresolved comments, post the finalize review)
   runs on a background thread with a blocking HTTP client, talking to the UI over
   a channel — mirroring how vybim drives LSP. Responses have Gerrit's `)]}'`
   XSSI guard line stripped before JSON parsing.
 - **Claude adjudicates, then applies — one session per change.** A single Claude
   Code session (resume-based one-shots keyed by a generated session id) is driven
   turn by turn: first a **verdict pass** in `plan` permission mode (structurally
-  unable to edit) returning schema-validated `agree/disagree/unsure` +
-  justification per comment; then, after triage, **per-comment apply** turns with
-  tools scoped to `Read,Edit` and the filesystem reach limited to the file's
-  directory. Edits compose because each turn reads the working tree the previous
-  turn wrote.
+  unable to edit), chunked one turn per file, returning schema-validated
+  `agree/disagree/unsure` + justification + a required `depends_on` naming any
+  out-of-code fact the verdict rests on; then, after triage, **per-comment apply**
+  turns with tools scoped to `Read,Edit` (no shell). Edits compose because each
+  turn reads the working tree the previous turn wrote.
 - **Two-panel manual triage (rung 0 only).** Left: code + reviewer comment.
-  Right: Claude's verdict + justification. The human accepts / rejects / edits
-  each comment's prose. No auto modes in v0.
+  Right: Claude's verdict, justification, and declared dependencies. The human
+  accepts / rejects / edits each comment's prose, and approves a drafted reply for
+  each rejection before leaving triage. No auto modes in v0.
 - **Confirm before write.** Each accepted comment's edit is shown as a
-  confirm-diff (patchset baseline vs. Claude's edit) reusing the ported diff
-  renderer. On confirm the edit stays in the worktree; rejecting reverts the
-  file. Nothing is pushed until the end.
-- **Finalize once, git-native.** `git commit --amend` folds all confirmed edits
-  into a single new patchset and pushes it. Only **after** the push succeeds does
-  Remendo mark accepted comments resolved and post the drafted replies for
-  rejected comments — so Gerrit never shows a resolution or a "fixed" reply with
-  no patchset behind it.
+  confirm-diff (the file's **pre-turn snapshot** vs. Claude's edit) reusing the
+  ported diff renderer, so the diff shows only that comment's change. On confirm
+  the edit is staged and stays in the worktree; rejecting restores the snapshot,
+  preserving edits already confirmed for earlier comments in the same file.
+  Nothing is pushed until the end.
+- **Finalize once, git-native, unattended.** A pre-push check aborts if the author
+  uploaded a new patchset during triage. Then `git commit --amend` folds all
+  confirmed edits into a single new patchset and pushes it. Only **after** the
+  push succeeds does Remendo issue one batched review post settling every comment
+  fate — so Gerrit never shows a resolution or a "fixed" reply with no patchset
+  behind it.
 
 ## Capabilities
 
@@ -62,19 +66,21 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
 - `review-workspace`: Launch-by-change-id, isolated git worktree lifecycle,
   patchset fetch/checkout, and abort-leaves-worktree behavior.
 - `gerrit-client`: Blocking Gerrit REST access on a background worker thread —
-  fetch change/files/comments, resolve comments, post replies, amend-and-push —
-  with XSSI-prefix stripping and channel delivery to the UI.
+  fetch change/files/comments, classify comment anchors (including the
+  `/COMMIT_MSG` and `/PATCHSET_LEVEL` pseudo-paths), settle every comment fate in
+  one batched review post, amend-and-push — with XSSI-prefix stripping and channel
+  delivery to the UI.
 - `claude-driver`: The shared Claude Code subprocess contract — one resume-based
   session per change, permission-mode and tool/dir scoping, structured-output
   verdicts — that both triage and apply build on.
 - `comment-triage`: The verdict pass and the two-panel manual triage UI; the
   verdict × human-decision model.
 - `fix-application`: Per-comment scoped apply via the resumed session, the
-  confirm-diff guard (reject reverts the file), and worktree accumulation of
-  confirmed edits.
-- `change-submission`: Amend into one new patchset, push, then batched resolve of
-  accepted comments and posting of approved replies for rejected comments —
-  strictly after a successful push.
+  snapshot-per-turn confirm-diff guard (reject restores the pre-turn snapshot),
+  and worktree accumulation of confirmed edits.
+- `change-submission`: The pre-push revision check, amend into one new patchset,
+  push, then a single batched review post settling every comment fate — strictly
+  after a successful push.
 
 ### Modified Capabilities
 <!-- Greenfield project; no existing capability specs to modify. -->
@@ -97,10 +103,12 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
 - **External dependencies**: the `claude` CLI (Claude Code) on `PATH`, verified
   at v2.1.220 to support the driving model this design needs (`--session-id` /
   `--resume` — including resuming a `plan` verdict session in `acceptEdits` with
-  context retained, tested end to end; `--output-format json` + `--json-schema`,
-  `--permission-mode plan`/`acceptEdits`, `--tools`, `--add-dir`,
-  `--max-budget-usd`); and a Gerrit instance reachable over REST with
-  credentials.
+  context retained, tested end to end; `--output-format json` returning a result
+  envelope with a `structured_output` object; `--json-schema` taking the schema
+  inline; `--permission-mode plan`/`acceptEdits`, `--tools`, `--max-budget-usd`);
+  and a Gerrit instance reachable over REST with credentials. This CLI surface is
+  **not a stable API** — it is pinned to a verified version and re-probed on
+  upgrade (design.md §10).
 
 ## Deferred (explicitly out of v0 scope)
 
@@ -112,8 +120,8 @@ diverging** (not a shared crate yet): the side-by-side diff renderer
   resume-based one-shots (architecture B); streaming is a later optimization.
 - Extracting a shared `vybim-core` crate.
 - Final **prose tuning** of the three prompts. Their roles, scoping, I/O
-  contracts, and granularity (per comment) are settled (see design.md §7 "Prompt
-  contract"); only exact wording and how much surrounding code each turn is shown
-  remain (design.md §9).
+  contracts, and granularity (per comment for apply, per file for verdicts) are
+  settled (see design.md §7 "Prompt contract"); only exact wording and how much
+  surrounding code each turn is shown remain (design.md §11).
 - Batching a comment-dense file's comments into one apply turn — a localized cost
   optimization; v0 is uniformly one turn per comment.
