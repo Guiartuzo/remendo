@@ -15,6 +15,11 @@ comment observes the edits already confirmed for earlier comments.
 - **WHEN** a comment was rejected or skipped during triage
 - **THEN** no apply turn is issued for it
 
+#### Scenario: Hand-fixed comments produce no apply turn
+- **WHEN** a comment was marked as fixed by hand during triage
+- **THEN** no apply turn is issued for it and no confirm-diff is shown, while its
+  file's current contents still participate in the finalize amend
+
 #### Scenario: A later comment's edit sees an earlier confirmed edit
 - **WHEN** an apply turn edits a file that an earlier confirmed comment already
   changed
@@ -42,8 +47,12 @@ edits already confirmed for earlier comments.
 The application SHALL present each comment's proposed edit as a diff between that
 turn's **pre-turn snapshot** and Claude's edit, so the diff shows only the change
 attributable to the comment under review, and SHALL require explicit user
-confirmation before the edit is kept. Nothing SHALL become part of the pushed
-patchset without confirmation.
+confirmation before the edit is kept. No edit *produced by an apply turn* SHALL
+become part of the pushed patchset without confirmation.
+
+This gate covers machine-produced edits. Changes the user makes by hand in their
+own editor against the worktree are their own review and are not gated here; they
+reach the patchset by way of the finalize amend.
 
 #### Scenario: Edit is shown before it is kept
 - **WHEN** an apply turn produces an edit for a comment

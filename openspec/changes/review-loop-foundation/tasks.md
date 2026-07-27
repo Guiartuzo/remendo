@@ -1,13 +1,31 @@
+> ⚠ **Read `open-decisions.md` first.** Several tasks below are blocked on
+> decisions that have not been made — notably 2.1/2.3 (Gerrit configuration and
+> auth), 3.1/3.2 (which clone, where the worktree lives, what a relaunch does),
+> 2.4/2.6 (Gerrit thread semantics and comment provenance) and 4.3 (the verdict
+> schema's concrete shape, including whether `depends_on.verify` is executed).
+> Starting those before the decision lands means guessing.
+
 ## 1. Project scaffold
 
 - [ ] 1.1 Initialize the Rust crate (`remendo`), edition 2024; set up CI (fmt +
       clippy + test) mirroring vybim's gates.
-- [ ] 1.2 Add dependencies: `crossterm`, `ratatui`, `similar`, `serde` (derive),
+- [ ] 1.2 Add dependencies: `crossterm`, `ratatui`, `similar`, `ropey`, `ignore`,
+      `tree-sitter` + `tree-sitter-highlight` + grammars, `serde` (derive),
       `serde_json`, and a blocking HTTP client (`ureq` + rustls). Confirm **no**
-      `tokio`.
+      `tokio`, and **no** `portable-pty`/`vt100` — v0 embeds no terminal.
 - [ ] 1.3 Copy `diff_view.rs` (+ its `Theme`/`git` seams) from vybim and adapt it
       to take an arbitrary before/after text pair (pre-turn snapshot vs edit), not
       just HEAD-vs-working-tree.
+- [ ] 1.4 Copy `theme.rs`, `syntax.rs`, and `buffer.rs` from vybim. `buffer.rs`
+      ports whole (448 lines, no crate-internal deps); its mutation methods go
+      unused in v0 but its file loading and line indexing are what the read-only
+      viewer needs.
+- [ ] 1.5 Port the **read-only** slice of `pane.rs`: syntax-highlighted viewport
+      render, scrolling (+ its existing viewport tests), `goto_line`, and search.
+      Leave behind multi-caret, insert/delete/undo, word motion and completion —
+      roughly two thirds of the module (design.md §11).
+- [ ] 1.6 Copy `file_tree.rs` (357 lines, depends only on `theme`) and
+      `minibuffer.rs` (comment-prose input).
 
 ## 2. Gerrit client (`gerrit-client`)
 
@@ -79,16 +97,33 @@
 
 - [ ] 5.1 Run the verdict pass on load, one turn per file; hold verdicts alongside
       comments.
-- [ ] 5.2 Two-panel layout: [code + reviewer comment | verdict + justification].
-- [ ] 5.3 Keybindings: accept / reject / edit-prose / next / prev. Record the
-      per-comment decision (human decision overrides the verdict).
-- [ ] 5.4 Edit-prose flow feeds the edited text into the later apply turn.
-- [ ] 5.5 Surface each verdict's `depends_on` next to its justification; collapse
+- [ ] 5.2 Layout: [file tree | document + comment | verdict + justification], tree
+      toggleable with a keystroke.
+- [ ] 5.3 Document pane: render the anchored document read-only with syntax
+      highlighting and the comment's line/range highlighted in place. The document
+      is polymorphic — source file, commit message (`/COMMIT_MSG`), or a synthetic
+      change-overview (`/PATCHSET_LEVEL`).
+- [ ] 5.4 File tree annotated per file with comment count + triage progress;
+      `/COMMIT_MSG` and `/PATCHSET_LEVEL` appear as entries marked as non-files.
+- [ ] 5.5 Keybindings: accept / reject / defer / fixed-by-hand / edit-prose /
+      next / prev / next-undecided / toggle-tree. Record the per-comment decision
+      (human decision overrides the verdict).
+- [ ] 5.6 Edit-prose flow (via `minibuffer`) feeds the edited text into the later
+      apply turn.
+- [ ] 5.7 Surface each verdict's `depends_on` next to its justification; collapse
       the same fact declared by several verdicts into one shared dependency rather
       than repeating it per comment.
-- [ ] 5.6 Reply drafting and approval happen **here**, at the end of triage — a
+- [ ] 5.8 Reply drafting and approval happen **here**, at the end of triage — a
       draft offered for every rejected comment, each approved / edited / declined
       before finalize starts, so Phase 3 needs no human input.
+- [ ] 5.9 Triage completion gate: an explicit action ends triage, reporting how
+      many comments are still undecided; confirming the gate maps those to the
+      skipped fate. Navigating past the last comment SHALL NOT end triage.
+- [ ] 5.10 Detect on-disk changes to worktree files and re-read them (no conflict
+      prompt — the pane is read-only). Invalidate any pending confirm-diff whose
+      file changed underneath it.
+- [ ] 5.11 Make the worktree path obtainable mid-review, for the
+      fix-in-your-own-editor path.
 
 ## 6. Apply + confirm (`fix-application`)
 
@@ -125,8 +160,10 @@
       local branch to read.
 - [ ] 7.3 Push rejected → surface, keep worktree, do nothing else.
 - [ ] 7.4 Push ok → issue the **single** batched review POST from 2.6 carrying
-      every comment fate (accepted → `unresolved: false`; rejected+replied →
-      reply text + `unresolved: true`). Replies were already approved in 5.6.
+      every comment fate: accepted → `unresolved: false`; **fixed-by-hand →
+      `unresolved: false`** (indistinguishable from accepted at this layer);
+      rejected+replied → reply text + `unresolved: true`; skipped → omitted
+      entirely. Replies were already approved in 5.8.
 
 ## 8. End-to-end verification
 
@@ -143,7 +180,7 @@
 ## 9. Follow-up design (not built here)
 
 - [x] 9.1 Verify a `plan`-mode session can be resumed in an edit-capable mode
-      (DONE — `acceptEdits`, context retained; see design.md §5/§11).
+      (DONE — `acceptEdits`, context retained; see design.md §5/§12).
 - [ ] 9.2 Tune the three prompts' prose and how much surrounding code each turn is
       shown (roles/scoping/granularity already settled in design.md §7).
 - [ ] 9.3 Revisit auto modes (rung 1 / rung 2) once rung 0 is proven.

@@ -15,7 +15,10 @@
 >
 > Two items remain **open** rather than fixed, both from "Not verified" below:
 > Gerrit auth (`tasks.md` 2.3) and confirming the `unresolved:false` resolve
-> mechanism against a real Gerrit (`tasks.md` 8.4).
+> mechanism against a real Gerrit (`tasks.md` 8.4). Both are carried forward in
+> `open-decisions.md`, which also catalogues the pre-build decisions a later
+> design pass surfaced — several of them descendants of findings here (the
+> `depends_on` schema shape, and whether its `verify` field is machine-executed).
 
 Findings from reviewing the `review-loop-foundation` change and then **executing its
 loop by hand** against a simulated Gerrit, before any Rust exists.

@@ -64,6 +64,18 @@ mutation: a thread is resolved by replying to it with `unresolved: false`.
   the approved replies to the rejected comments, leaving those rejected comments
   unresolved
 
+#### Scenario: Hand-fixed comments resolve alongside applied ones
+- **WHEN** the pushed patchset includes a fix the user wrote by hand for a comment
+  they marked as fixed by hand
+- **THEN** that comment is carried in the same batched post with
+  `unresolved: false`, indistinguishably from a comment whose fix came from an
+  apply turn
+
+#### Scenario: Skipped comments are left alone
+- **WHEN** comments were skipped during triage
+- **THEN** they are omitted from the batched post entirely, so they are neither
+  resolved nor replied to
+
 #### Scenario: Failed push settles nothing
 - **WHEN** the push of the new patchset fails
 - **THEN** the batched review post is not issued, so no comment is resolved and no
