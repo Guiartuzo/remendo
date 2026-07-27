@@ -1,0 +1,68 @@
+schema: spec-driven
+
+# Project context — surfaced to AI as constraints for every change/artifact.
+context: |
+  Remendo — a keyboard-driven terminal app for reviewing Gerrit changes, where
+  Claude Code adjudicates and applies reviewer comments. Rust + ratatui. Sibling
+  project to vybim (a terminal editor); reuse from vybim is by COPY-AND-DIVERGE
+  (diff_view.rs + `similar`, git.rs's spawn-wait-parse, lsp/transport.rs's
+  worker-thread + channel pattern) — no shared crate yet.
+
+  Development is SPEC-ANCHORED: every change has proposal/design/specs/tasks under
+  openspec/, and implementation follows the spec. Do not implement ahead of spec.
+
+  === Code style ===
+  - Functions: 4–20 lines. Split if longer.
+  - Files: under 500 lines. Split by responsibility (SRP: one responsibility per
+    module, one thing per function).
+  - Names: specific and unique. Avoid `data`, `handler`, `Manager`. Prefer names
+    that return <5 grep hits in the codebase.
+  - Types: explicit and precise. No stringly-typed domain values, no `Box<dyn
+    Any>`; prefer newtypes/enums over bare `String`/`HashMap` for domain data.
+    Every public function fully typed.
+  - No code duplication. Extract shared logic into a function/module.
+  - Early returns over nested ifs. Max 2 levels of indentation.
+  - Error messages (thiserror/anyhow) MUST include the offending value and the
+    expected shape.
+
+  === Comments ===
+  - Keep existing comments on refactor — they carry intent and provenance.
+  - Write WHY, not WHAT. No `// increment counter` above `i += 1`.
+  - Docstrings (`///`) on public items: intent + one usage example.
+  - Reference issue numbers / commit SHAs when a line exists because of a specific
+    bug or upstream constraint.
+
+  === Tests ===
+  - Single command: `cargo test`.
+  - Every new function gets a test. Bug fixes get a regression test.
+  - Mock external I/O (Gerrit REST, filesystem, git, the `claude` subprocess) with
+    named fake types implementing the project's own trait — not inline closures or
+    ad-hoc stubs. (Dovetails with wrapping third-party libs behind a trait.)
+  - Tests are F.I.R.S.T: fast, independent, repeatable, self-validating, timely.
+
+  === Dependencies ===
+  - Inject dependencies through constructor/parameter (struct fields, fn args),
+    not globals/statics/`lazy_static`.
+  - Wrap third-party libs behind a thin, project-owned trait: the HTTP client
+    behind a Gerrit trait, the git CLI behind a git trait, the `claude` CLI behind
+    a driver trait, `similar` behind the diff module. Swapping the backend must be
+    an implementation change behind the seam.
+
+  === Structure ===
+  - Follow Rust module conventions. Small focused modules over god files.
+    Predictable paths (`src/<module>.rs`, tests alongside or under `tests/`).
+
+  === Formatting ===
+  - `cargo fmt` is the sole authority; CI enforces `cargo fmt --check` + `clippy`
+    + `cargo test` (mirror vybim's gates). No style debate beyond the formatter.
+
+  === Logging ===
+  - Structured JSON for debugging / observability.
+  - Plain text only for user-facing TUI / CLI output.
+
+# Per-artifact rules — additional constraints applied when generating each artifact.
+rules:
+  tasks:
+    - Each task names the module/trait it touches and stays testable in isolation.
+  design:
+    - State which third-party lib each new trait wraps, and the fake used to test it.
