@@ -49,7 +49,7 @@
       into fetching them later. Credentials sit on `GitCli`, not `GerritApi`.
       Errors are per-module `thiserror` enums, each variant carrying the
       offending value.
-- [ ] 2.1 Worker thread owning a blocking HTTP client; a `GerritEvent` channel to
+- [x] 2.1 Worker thread owning a blocking HTTP client; a `GerritEvent` channel to
       the UI. No async runtime.
 - [x] 2.2 Response helper that strips the `)]}'` XSSI prefix before `serde_json`.
       A body *without* the guard is an error, not a pass-through: Gerrit always
@@ -63,21 +63,21 @@
       explicit override always winning. Put the derived URL in the failure
       message — a subpath-hosted or SSH-remote Gerrit is not always derivable
       (design.md §13 table), and a hostless HTTP error is not actionable.
-- [ ] 2.5 TLS against the system root store (`rustls-native-certs`); on validation
+- [x] 2.5 TLS against the system root store (`rustls-native-certs`); on validation
       failure, point at `git config --get http.sslCAInfo`. A Gerrit that `git
       push` reaches but Remendo cannot is a trust-store difference, and reporting
       it as an auth failure costs a long detour.
-- [ ] 2.6 Fetch: change + `current_revision` + `branch` + files; inline comments →
+- [x] 2.6 Fetch: change + `current_revision` + `branch` + files; inline comments →
       assemble into **threads** by `in_reply_to` chain → thread state is the
       **last** comment's `unresolved` flag (branch tiebreak: max `updated`) → map
       to (file, line/range, ordered comments with author + prose + id). Retain
       `current_revision` and `branch` — finalize needs both.
-- [ ] 2.7 Filter threads: exclude drafts (never fetch `/drafts`); **include** the
+- [x] 2.7 Filter threads: exclude drafts (never fetch `/drafts`); **include** the
       user's own threads. Any self-authored filtering that is later added must be
       thread-level (threads you *started*) — filtering comments you wrote would
       drop your reply out of a reviewer's thread and take the thread's state with
       it.
-- [ ] 2.8 Fetch robot comments from `/robotcomments` — a **second endpoint with a
+- [x] 2.8 Fetch robot comments from `/robotcomments` — a **second endpoint with a
       distinct shape** (`robot_id`, `url`, `fix_suggestions`), not a filter flag.
       Model them as their own type; `fix_suggestions` is unused in v0 (see
       design.md §12 item 9) but must not be discarded at parse time.
@@ -90,13 +90,13 @@
       accounting for Gerrit's synthetic Parent/Author/Commit header offset), or
       `/PATCHSET_LEVEL` (change-level, no path). Never derive an on-disk path or
       directory from the two pseudo-paths.
-- [ ] 2.11 Mutation: **one** batched review POST to
+- [x] 2.11 Mutation: **one** batched review POST to
       `/changes/{id}/revisions/current/review` carrying every comment fate —
       accepted with `unresolved: false`, rejected-with-reply with
       `unresolved: true`. Each reply sets `in_reply_to` to its thread's **last**
       comment id, not its first. There is no mark-resolved endpoint; do not model
       one. Used only in finalize.
-- [ ] 2.12 Unit-test XSSI stripping, anchor classification (including the
+- [x] 2.12 Unit-test XSSI stripping, anchor classification (including the
       `/COMMIT_MSG` line offset), and comment mapping against captured fixtures.
       Add thread-assembly fixtures: a thread closed by a reply (must NOT be
       triaged), a three-comment thread whose live ask is the last comment, a

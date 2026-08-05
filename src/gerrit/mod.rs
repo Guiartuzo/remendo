@@ -11,14 +11,20 @@ pub mod api;
 pub mod base_url;
 pub mod comment;
 pub mod fake;
+pub mod http;
+pub mod load;
 pub mod response;
 pub mod thread;
+pub mod worker;
 
 pub use anchor::CommentAnchor;
 pub use api::{ChangeInfo, GerritApi, ReviewComment, ReviewInput};
 pub use comment::{Comment, CommentRange};
 pub use fake::FakeGerrit;
+pub use http::GerritHttp;
+pub use load::{LoadedChange, load_change};
 pub use thread::{Thread, ThreadSet};
+pub use worker::{GerritEvent, GerritRequest, GerritWorker};
 
 /// Failures reaching or decoding Gerrit.
 ///

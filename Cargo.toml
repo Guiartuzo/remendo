@@ -45,4 +45,8 @@ thiserror = "2.0.19"
 # Blocking HTTP. `platform-verifier` validates against the SYSTEM root store
 # rather than ureq's bundled Mozilla roots — an internal Gerrit fronted by a
 # corporate CA is the normal case, and bundled roots reject it (design.md §13).
-ureq = { version = "3.3.0", features = ["platform-verifier"] }
+ureq = { version = "3.3.0", features = ["json", "platform-verifier"] }
+
+# HTTP Basic auth for the Gerrit REST API. The credential comes from
+# `git credential fill`; this only encodes it for the Authorization header.
+base64 = "0.23.1"
