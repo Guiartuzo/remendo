@@ -23,4 +23,6 @@ pub mod search;
 pub mod submit;
 pub mod syntax;
 pub mod theme;
+pub mod triage;
+pub mod verdict;
 pub mod workspace;
