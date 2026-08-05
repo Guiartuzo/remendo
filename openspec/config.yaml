@@ -67,8 +67,12 @@ context: |
 
   === Code style ===
   - Functions: 4–20 lines. Split if longer.
-  - Files: under 500 lines. Split by responsibility (SRP: one responsibility per
-    module, one thing per function).
+  - Files: under 500 lines **of code**, counted excluding the `#[cfg(test)]`
+    module (settled 2026-08-05). Colocated tests are idiomatic and endorsed
+    below, so counting them here would penalize coverage. Split by
+    responsibility (SRP: one responsibility per module, one thing per function)
+    — and note the SRP half is the real rule: `pane.rs` was split at ~580 lines
+    because search is a separate responsibility, not because of the number.
   - Names: specific and unique. Avoid `data`, `handler`, `Manager`. Prefer names
     that return <5 grep hits in the codebase.
   - Types: explicit and precise. No stringly-typed domain values, no `Box<dyn

@@ -2,9 +2,12 @@
 > configuration and auth, worktree topology and relaunch, thread semantics,
 > provenance, the verdict schema, and whether `depends_on.verify` is executed. The
 > reasoning lives in `design.md` §13; the tasks below now state the decisions
-> rather than defer to them. What remains open there is Tier 4 (trait surfaces,
-> error taxonomy), Tier 5 (cost per change — instruments itself via 4.9), and
-> Tier 6.
+> rather than defer to them.
+>
+> **Tier 4 (trait surfaces, error model) was settled on 2026-08-05** while
+> building `gerrit-client`, since a trait's error type is part of its surface —
+> see `design.md` §14. What remains open is Tier 5 (cost per change, which
+> instruments itself via 4.9) and Tier 6.
 
 ## 1. Project scaffold
 
@@ -40,13 +43,23 @@
 
 ## 2. Gerrit client (`gerrit-client`)
 
+- [x] 2.0 Define the `GerritApi` and `GitCli` traits and their fakes per
+      **design.md §14**. `GerritApi` has **no `drafts` method** — excluding
+      drafts was a decision, and a trait without the method cannot be talked
+      into fetching them later. Credentials sit on `GitCli`, not `GerritApi`.
+      Errors are per-module `thiserror` enums, each variant carrying the
+      offending value.
 - [ ] 2.1 Worker thread owning a blocking HTTP client; a `GerritEvent` channel to
       the UI. No async runtime.
-- [ ] 2.2 Response helper that strips the `)]}'` XSSI prefix before `serde_json`.
-- [ ] 2.3 Auth via `git credential fill` for the resolved host — on the **git**
+- [x] 2.2 Response helper that strips the `)]}'` XSSI prefix before `serde_json`.
+      A body *without* the guard is an error, not a pass-through: Gerrit always
+      emits it on the JSON API, so its absence means an HTML login/SSO page from
+      a failed auth. The error quotes the body so it does not read as a parser
+      bug.
+- [x] 2.3 Auth via `git credential fill` for the resolved host — on the **git**
       trait, not the Gerrit one. No `.netrc` parsing, no credential file, no
       stored secret. Error names the host when no credential comes back.
-- [ ] 2.4 Resolve the Gerrit base URL from the clone's `origin` remote, with an
+- [x] 2.4 Resolve the Gerrit base URL from the clone's `origin` remote, with an
       explicit override always winning. Put the derived URL in the failure
       message — a subpath-hosted or SSH-remote Gerrit is not always derivable
       (design.md §13 table), and a hostless HTTP error is not actionable.
@@ -68,11 +81,11 @@
       distinct shape** (`robot_id`, `url`, `fix_suggestions`), not a filter flag.
       Model them as their own type; `fix_suggestions` is unused in v0 (see
       design.md §12 item 9) but must not be discarded at parse time.
-- [ ] 2.9 Drop threads anchored on a non-current patchset and **carry the count**
+- [x] 2.9 Drop threads anchored on a non-current patchset and **carry the count**
       out to the UI. Their line anchors address code several patchsets gone; a
       shorter queue must not be indistinguishable from a change with fewer
       comments.
-- [ ] 2.10 Classify comment anchors into a `CommentAnchor` enum: real file path,
+- [x] 2.10 Classify comment anchors into a `CommentAnchor` enum: real file path,
       `/COMMIT_MSG` (commit message; resolve the line against the real message,
       accounting for Gerrit's synthetic Parent/Author/Commit header offset), or
       `/PATCHSET_LEVEL` (change-level, no path). Never derive an on-disk path or
@@ -183,7 +196,10 @@
       measured self-clearing dependency was a probe invoking `claude` itself, so
       auto-running it would silently spawn billable subprocesses. No allowlist, no
       confirm gate, no code path that could run one in v0.
-- [ ] 4.11 Pin and record the verified `claude` version. Everything was probed
+- [ ] 4.11 **GATE ON §4 — do this first, before 4.1.** Deferred deliberately on
+      2026-08-05 (re-probing costs money and blocks nothing until §4), but §4
+      may not start until it is done.
+      Pin and record the verified `claude` version. Everything was probed
       against **2.1.220**; the dev box is now on **2.1.222**, so per this project's
       own rule the pin is stale. Re-probe the envelope shape,
       `structured_output`, `--tools`, inline `--json-schema`, and

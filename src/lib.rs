@@ -13,6 +13,8 @@
 pub mod buffer;
 pub mod diff_view;
 pub mod file_tree;
+pub mod gerrit;
+pub mod git;
 pub mod minibuffer;
 pub mod pane;
 pub mod search;

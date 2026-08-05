@@ -1,10 +1,11 @@
 # Open decisions — `review-loop-foundation`
 
-> **STATUS (2026-08-05): Tiers 1–3 are RESOLVED.** They were worked through in one
-> session as intended. The decisions and their reasoning now live in `design.md`
-> §13 and in the specs; the tasks state them directly. Items 1–6 below are kept as
-> the record of *what was undefined and why it mattered* — read §13 for what was
-> chosen. **Tiers 4, 5 and 6 remain open.**
+> **STATUS (2026-08-05): Tiers 1–4 are RESOLVED.** Tiers 1–3 were worked through
+> in one session as intended (→ `design.md` §13); Tier 4 was settled while
+> building `gerrit-client`, since a trait's error type is part of its surface
+> (→ `design.md` §14). The items below are kept as the record of *what was
+> undefined and why it mattered* — read §13 and §14 for what was chosen.
+> **Tiers 5 and 6 remain open.**
 >
 > | # | Decision | Outcome |
 > |---|---|---|
@@ -14,6 +15,11 @@
 > | 4 | Comment provenance | exclude drafts; **include** own threads and robot comments; skip non-current-patchset threads and report the count |
 > | 5 | Verdict schema shape | `{comment_id, verdict, justification, depends_on}`; `depends_on` a nullable **array**; **`confidence` dropped** |
 > | 6 | Is `depends_on.verify` executed? | **No** — human-facing prose, never run |
+> | 7 | Trait surfaces and their fakes | `GerritApi`/`GitCli`/`ClaudeDriver` are traits with named fakes; `similar` stays a module boundary |
+> | 8 | Error model and partial failure | per-module `thiserror` enums; retry once, then an explicit **unadjudicated** state |
+>
+> Items 7 and 8 (Tier 4) were settled **2026-08-05** while building
+> `gerrit-client` — see `design.md` §14. **Tier 5 and Tier 6 remain open.**
 >
 > One decision reversed a prior recommendation: item 4's suggestion to exclude
 > self-authored comments and defer robot comments was **not** taken. Both are in
@@ -210,7 +216,7 @@ matter.
 
 ---
 
-## Tier 4 — Required by `openspec/config.yaml`, not yet done
+## Tier 4 — Required by `openspec/config.yaml`  ✅ RESOLVED (see `design.md` §14)
 
 ### 7. Trait surfaces and their fakes
 
@@ -227,13 +233,17 @@ Missing, though all are mandated by the dependency rules:
 | Claude driver | the `claude` CLI | named, surface undefined |
 | Diff | `similar` | — undefined |
 
-**Partially answered by the Tier 1 session.** The git trait gained its first
-concrete methods: `fill_credential(host)` (decision 1 — auth is git's job, not
-Gerrit's), `remote_url`, `worktree_add`, and `config_get` for `http.sslCAInfo`.
-Its fake returns canned values for all four. The Gerrit trait's surface is now
-also more constrained than it was: threads rather than comments, plus a second
-fetch path for robot comments. The remaining work is designing the surfaces on
-purpose rather than accreting them.
+**RESOLVED 2026-08-05 — the full surfaces are in `design.md` §14.** Three of the
+four are traits (`GerritApi`/`ureq`, `GitCli`/the git CLI, `ClaudeDriver`/the
+`claude` CLI), each with a named fake. The fourth is **not** a trait: `similar`
+is a pure function with no I/O to stub, so `config.yaml`'s wrap requirement is
+met by confining it to the `diff_view` module, and a trait would be indirection
+with a single implementation.
+
+Two shapes fell out of decisions rather than convenience: credentials sit on
+`GitCli` (not `GerritApi`) because they come from `git credential fill`, and
+`GerritApi` has **no `drafts` method at all** — excluding drafts was a decision,
+and a trait without the method cannot be talked into fetching them later.
 
 These method surfaces are the app's actual internal API. Worth designing on
 purpose rather than accreting them one call site at a time.
@@ -262,6 +272,16 @@ comments (should exit gracefully, currently unstated).
 "unadjudicated" state in the tree rather than silently proceeding — a missing
 verdict must never look like an empty one, which is the same failure mode
 finding #14 is about.
+
+**RESOLVED 2026-08-05 — recommendation adopted; see `design.md` §14.** Errors are
+per-module `thiserror` enums (`GerritError`, `GitError`, `DriverError`) composed
+upward with `#[from]`, rather than one crate-wide enum that would force every
+call site to match variants its layer cannot produce. Every variant carries the
+offending value. The two cases already built show what that buys: a missing XSSI
+guard reports an HTML login page rather than "expected value at line 1 column 1",
+and a TLS failure names the host and points at `git config --get
+http.sslCAInfo`. Zero-unresolved-threads exits gracefully; `claude` missing from
+`PATH` is reported at startup by name.
 
 ---
 
@@ -310,7 +330,25 @@ a real compile, not a discussion:
 
 - **`unresolved: false` actually resolves threads on your Gerrit version**
   (`tasks.md` 8.4). The mechanism was exercised only against a local stub.
-- **Nothing has been compiled.** No `cargo`/`rustc` on the dry-run box, so the
-  applied edits were reviewed logically, never type-checked (`tasks.md` 8.5).
+  **Still owed** — needs a real Gerrit, so it cannot be closed before §7.
+- ~~**Nothing has been compiled.**~~ **CLEARED 2026-08-05.** The dry-run box had
+  no `cargo`; this one does (1.96.0). The crate builds and `cargo test` runs in
+  CI and locally, so code is type-checked rather than reviewed logically.
 - **`--tools` vs `acceptEdits` orthogonality** — the probe showed `--tools`
   constraining alongside `acceptEdits`, not that omitting it would grant Bash.
+  **Still owed**, and now compounded by the version drift below.
+- **NEW: the pinned `claude` version is stale.** `config.yaml` and `tasks.md`
+  4.11 pin **2.1.220**; the development box runs **2.1.222**. Everything about
+  the envelope shape, `structured_output`, `--tools`, inline `--json-schema` and
+  resume-across-permission-modes was probed against 2.1.220 only.
+
+  **DEFERRED to the start of §4 (decided 2026-08-05).** Re-probing costs real
+  money — the dry run measured $0.14 for one trivial schema probe — and it
+  blocks nothing until `claude-driver` is built. Deferring also avoids paying
+  twice if the box upgrades again first. The obligation does not lapse: **§4
+  must not begin until the pin is re-verified or the box is pinned back**, and
+  task 4.11 is the gate.
+- **NEW: the release job has never run.** `tasks.md` 1.8 is implemented but no
+  tag has been pushed, so the `objdump` glibc-2.31 guard is untested. It also
+  only covers Remendo's own binary — `tasks.md` 8.6 (whether `claude` and git
+  2.25.1 run on Ubuntu 20.04) remains entirely unverified.

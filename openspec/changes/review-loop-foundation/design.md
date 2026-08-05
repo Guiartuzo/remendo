@@ -446,7 +446,16 @@ REST base URL is not always recoverable from them:
 |---|---|---|
 | `https://gerrit.corp/a/proj` | `https://gerrit.corp/` | fine |
 | `ssh://you@gerrit.corp:29418/proj` | `https://gerrit.corp/` | assumes 443, no subpath |
-| `https://corp.com/gerrit/a/proj` | `https://corp.com/` ✗ | **subpath lost** |
+| `https://corp.com/gerrit/a/proj` | `https://corp.com/gerrit/` | fine — see below |
+| `https://corp.com/gerrit/proj` | `https://corp.com/` ✗ | **subpath lost** |
+
+**Correction, 2026-08-05, from implementing this.** The third row above
+originally read as a loss. It is not: Gerrit's authenticated URLs carry an `/a/`
+segment, and everything *before* it is the Gerrit root — so a subpath-hosted
+Gerrit is recovered exactly when the remote uses that form, which is the normal
+authenticated case. What remains genuinely ambiguous is the fourth row, where
+`corp.com/gerrit/proj` could be host `corp.com` serving project `gerrit/proj` or
+a Gerrit at `corp.com/gerrit` serving `proj`; nothing in the string decides it.
 
 So derivation is a *default*, never a requirement, and the derived URL must
 appear in the failure message — a bare 404 with no host in it is a long detour.
@@ -802,6 +811,128 @@ queue and forces two things §3's sketch did not have:
                               ▼
                        SKIPPED fate (nothing posted)
 ```
+
+## 14. Trait surfaces, their fakes, and the error model
+
+Settled 2026-08-05 while building `gerrit-client`, closing `open-decisions.md`
+Tier 4 items 7 and 8. `config.yaml` requires third-party libraries to sit behind
+a project-owned trait and requires each trait's wrapped library and test fake to
+be recorded here; it also makes error quality a first-class rule. These are the
+application's actual internal API, so they are designed once rather than
+accreted one call site at a time.
+
+### What is a trait, and what is only a module
+
+Three seams are traits, because each wraps an external process or socket that
+tests must not touch. The fourth is not:
+
+| Seam | Wraps | Fake | Kind |
+|---|---|---|---|
+| `GerritApi` | `ureq` (blocking HTTP) | `FakeGerrit`, serving captured fixtures | trait |
+| `GitCli` | the `git` CLI | `FakeGit`, returning canned values | trait |
+| `ClaudeDriver` | the `claude` CLI | `FakeDriver`, returning canned envelopes | trait |
+| diff | `similar` | — none needed | **module boundary** |
+
+`similar` is deliberately *not* a trait. It is a pure function from two strings
+to a row stream — no I/O, no environment, nothing to stub — so the wrap that
+`config.yaml` asks for is satisfied by keeping it inside `diff_view` and never
+importing it elsewhere. A trait there would be indirection with one
+implementation.
+
+### `GitCli`
+
+Wider than it first appears, because two decisions put work on git that might
+have gone elsewhere: credentials come from `git credential fill` (§13), and the
+CA hint comes from git's own config.
+
+```
+   fn repo_root()                          -> PathBuf      cwd-inside-a-clone check
+   fn remote_url(remote)                   -> String       base-URL derivation
+   fn config_get(key)                      -> Option       http.sslCAInfo on TLS failure
+   fn fill_credential(host)                -> Credential   §13 — NOT the Gerrit trait
+   fn fetch(remote, refspec)               -> ()
+   fn worktree_add(path, revision)         -> ()
+   fn stage(worktree, path)                -> ()           confirm stages, §8
+   fn commit_amend(worktree, message)      -> ()           message is Some when
+                                                           /COMMIT_MSG was accepted
+   fn push(worktree, refspec)              -> ()
+```
+
+`config_get` returns `Option` rather than erroring on an unset key: `git config
+--get` exits non-zero when a key is simply absent, which is not a failure.
+
+### `GerritApi`
+
+```
+   fn change(change_id)          -> ChangeInfo   current_revision + branch + project
+   fn comments(change_id)        -> path -> [Comment]
+   fn robot_comments(change_id)  -> path -> [Comment]     the second endpoint (§13)
+   fn post_review(change_id, review) -> ()                the ONE batched call
+```
+
+**There is deliberately no `drafts` method.** Excluding drafts was a decision
+(§13), and a trait with no method for them cannot be made to fetch them by a
+later careless call site. The same reasoning gives `post_review` no sibling: a
+mark-resolved mutation does not exist in Gerrit, so modelling one would invite
+code that calls it.
+
+### `ClaudeDriver`
+
+Sketched here for completeness; its detail belongs to §5/§7 and lands with §4 of
+`tasks.md`.
+
+```
+   fn verdict_turn(session, prompt, schema) -> Envelope<Vec<Verdict>>
+   fn apply_turn(session, prompt, cwd)      -> Envelope<()>
+   fn reply_turn(session, prompt)           -> Envelope<Reply>
+```
+
+Every method returns the **envelope**, not the payload, so `is_error` and
+`total_cost_usd` cannot be skipped by a caller that only wants the result
+(§5, `tasks.md` 4.2/4.9).
+
+### Error model: per-module enums, no crate-wide god type
+
+Each module owns a `thiserror` enum — `GerritError`, `GitError`, `DriverError` —
+and the application layer composes them with `#[from]`. A single crate-wide enum
+would force every call site to match on variants that its layer cannot produce.
+
+Every variant carries **the offending value and the expected shape**, which is
+`config.yaml`'s rule and is what makes the difference between an error that ends
+an investigation and one that starts a long detour. Two cases already earn it:
+
+```
+   no XSSI guard  ──▶  "response is not Gerrit's JSON API … Body began:
+                        <!DOCTYPE html><title>Sign in</title>…"
+                        (not "expected value at line 1 column 1")
+
+   TLS failure    ──▶  names the host AND points at `git config --get
+                        http.sslCAInfo` — a Gerrit that `git push` reaches but
+                        Remendo cannot is a trust-store difference, not an
+                        auth failure
+```
+
+### Partial failure: retry once, then say so
+
+Adopting `open-decisions.md` item 8's recommendation. The verdict pass is
+chunked per file, so one file can fail while six succeed. Proceeding with six
+would be a **silently incomplete triage** — the same failure mode as a missing
+`depends_on` reading as an empty one (§9).
+
+```
+   verdict pass over 7 files
+        │
+        ├── file 3 fails ──▶ retry once
+        │                       │
+        │                       └── fails again ──▶ mark UNADJUDICATED
+        │                                            (an explicit state in the
+        │                                             tree, never an empty one)
+        └── the run continues; the gap is visible, not inferred
+```
+
+A change with **zero** unresolved threads exits gracefully with a message rather
+than opening an empty UI. `claude` absent from `PATH` is reported by name at
+startup, not on the first turn.
 
 ## 12. Open threads (next design tasks, not part of this change's build)
 
