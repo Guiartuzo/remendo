@@ -92,7 +92,7 @@ fn report_workspace(workspace: &workspace::Workspace) {
     println!(
         "  patchset {} ({})",
         change.current_patch_set(),
-        &change.current_revision
+        change.current_revision
     );
     let how = if workspace.resumed {
         "resumed"
