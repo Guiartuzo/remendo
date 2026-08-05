@@ -253,10 +253,12 @@ human's decisions**, which Claude never saw happen.
 
 ```
   TURN 1..F · VERDICT (plan mode, ONE TURN PER FILE)
-    feed:  change subject/message · that file's comments (line+author+prose)
-    Claude uses Read/Grep to inspect the real code (cannot edit)
-    emits: {comment_id, verdict, justification, confidence, depends_on}
-           (schema-validated; depends_on required, nullable)
+    feed:  change subject/message · that file's comment THREADS
+           (anchor + whole exchange + author-per-comment, see §13)
+    Claude reads the context files FIRST (config.yaml, CLAUDE.md, CI),
+      then uses Read/Grep to inspect the real code (cannot edit)
+    emits: {comment_id, verdict, justification, depends_on}
+           (schema-validated; depends_on required, nullable ARRAY)
     session now holds ──▶ [ the code it read ][ all comments ][ its verdicts ]
                                           │
         ── human triages (accept/reject/edit) — Claude is BLIND to this ──
@@ -285,9 +287,21 @@ as `agree`, with the nuance in the justification.
   does not sway the verdict (no reviewer-profile config in v0).
 - Justification is reviewer-facing quality — it doubles as ammunition for the
   reply prompt.
-- **`depends_on` is required** (nullable, not omittable): the out-of-code fact the
-  verdict rests on — CI config, tool version, team convention, roadmap, ticket
-  number — or `null` when the code alone settles it. See §9.
+- **`depends_on` is required** (nullable, not omittable): an *array* of the
+  out-of-code facts the verdict rests on — CI config, tool version, team
+  convention, roadmap, ticket number — or `null` when the code alone settles it.
+  See §9 and §13.
+- **No `confidence` field.** It was specified, then removed: the dry run measured
+  9 of 12 context-dependent verdicts *filed as confident*, so a self-reported
+  score was not merely noisy but anti-correlated with the property the human
+  needs. `depends_on` carries the same signal in a form the model cannot flatter
+  — `null` versus three named facts is grounded, a `high` is not.
+- **Reads the written-down context before adjudicating.** The turn has `Read` in
+  `plan` mode, and much of what a verdict would otherwise declare as a dependency
+  is sitting in the worktree: `openspec/config.yaml`, `CLAUDE.md`, CI workflow
+  files. Instructing the turn to read those first converts would-be dependencies
+  into settled facts at zero risk, and leaves `depends_on` for the genuine
+  residue. This is §9's second-order fix applied one stage earlier.
 - Runs in `plan` mode with `--output-format json --json-schema`, **one turn per
   file**. A single turn over a 40-comment change returns 40 adjudications after
   reading five files, which is where truncation and blanket "looks fine" verdicts
@@ -385,6 +399,169 @@ one turn is a localized optimization deferred to later.
   v0 ships rung 0 only.
 - **Apply granularity**: **per comment** (locked, §7) — the loop is uniformly
   per-comment. The **verdict** pass is the one exception: chunked per *file* (§7).
+- **cwd must be inside a clone of the change's project** (§13). A change id names
+  no repository; this one constraint supplies the Gerrit base URL, the credential,
+  and the clone, and it is how `git` itself behaves.
+- **Auth is `git credential fill`** (§13) — not `.netrc` parsing, not a config
+  file. Remendo stores no secret and inherits every mechanism already working for
+  `git push`.
+- **The triage unit is the THREAD, not the comment** (§13). State is the last
+  comment's `unresolved` flag; the question is the whole exchange.
+- **Only current-patchset threads are triaged**, and the count of older skipped
+  ones is reported (§13). A stale anchor is drift nobody in this session caused.
+- **Drafts are excluded; your own threads and robot comments are in** (§13).
+- **`depends_on.verify` is never executed** (§13).
+
+## 13. Startup, thread identity, and the limit of `verify`
+
+Settled 2026-08-05 in a decisions session over `open-decisions.md` Tiers 1–3.
+Tiers 4–6 remain open there.
+
+### The startup cascade
+
+`remendo 12345` must answer five questions, and they are not five decisions —
+they are one. A change id identifies no repository, so *something* must supply
+the context. Requiring cwd to be inside a clone supplies all of it:
+
+```
+   remendo 12345
+      │
+      ├─ cwd inside a clone?  ── no ──▶ error, exit (no worktree created)
+      │        │ yes
+      │        ▼
+      │   git remote get-url origin
+      │        ├──▶ host ──▶ REST base URL   (explicit override always wins)
+      │        └──▶ host ──▶ git credential fill ──▶ user + password
+      │
+      ├─ GET /changes/12345 ──▶ `project` field
+      │        └── mismatches the clone? ──▶ error naming BOTH values
+      │
+      └─ worktree at $XDG_STATE_HOME/remendo/<project>/<change-id>/
+```
+
+**Where derivation breaks.** Gerrit remotes are not uniformly shaped, and the
+REST base URL is not always recoverable from them:
+
+| origin remote | derived base | risk |
+|---|---|---|
+| `https://gerrit.corp/a/proj` | `https://gerrit.corp/` | fine |
+| `ssh://you@gerrit.corp:29418/proj` | `https://gerrit.corp/` | assumes 443, no subpath |
+| `https://corp.com/gerrit/a/proj` | `https://corp.com/` ✗ | **subpath lost** |
+
+So derivation is a *default*, never a requirement, and the derived URL must
+appear in the failure message — a bare 404 with no host in it is a long detour.
+
+**Why `git credential fill` over `.netrc`.** `.netrc` is one mechanism; teams use
+several. Asking git resolves whatever the user already has working — keychains,
+libsecret, `credential.helper store`, gitcookies, corporate SSO helpers — and
+means Remendo owns no secret store and needs no config file for auth at all. It
+also places credentials behind the **git** trait rather than the Gerrit trait,
+which is the first concrete method on a surface `open-decisions.md` item 7 still
+owes. Same principle for TLS: use the system root store, and when it fails, point
+at `git config --get http.sslCAInfo`, because that is where a corporate CA
+already lives for everyone whose `git push` works.
+
+### Relaunch reuses the worktree, and the verdict cache is why
+
+`review-workspace` leaves the worktree in place on abort, so the *second* run
+against any change hits an existing worktree. It is a resume.
+
+```
+   abort mid-review
+      ├─ worktree + staged confirmed edits ──▶ ON DISK, survive
+      ├─ verdicts ─────────────────────────▶ memory, lost   ← cost money
+      ├─ triage decisions ─────────────────▶ memory, lost   ← cost thought
+      └─ drafted replies ──────────────────▶ memory, lost
+```
+
+Re-running the verdict pass is not merely a repeat charge, it is
+**non-deterministic**: a second pass returns different verdicts over a worktree
+that already contains round-one fixes, so Claude adjudicates comments whose fix
+is already applied. Persist the expensive half — verdict payloads — and redo the
+cheap half (human decisions) by hand.
+
+**The cache is keyed by `(change id, revision)`, not change id.** A new patchset
+means the cached verdicts describe code that no longer exists; that key turns a
+correctness bug into a cache miss. The same file carries `total_cost_usd` per
+turn, which is what `open-decisions.md` item 9 needs to price a change.
+
+### The thread is the unit
+
+Nothing previously distinguished a comment from a thread, and the naive filter
+(`unresolved == true` on any comment) re-surfaces settled threads. But the
+sharper case is a thread that is *correctly* identified as open:
+
+```
+  A  @rafa   "this is O(n²)"                    unresolved: true
+     └─ B  @you    "it's bounded at 8 items"    unresolved: true
+        └─ C  @rafa   "fine — document that"    unresolved: true
+
+  thread state: unresolved ✓   ← triage it, correctly
+  but the ASK is C, not A.
+```
+
+Adjudicating only the first comment hands Claude a question conceded two comments
+ago, and drafts a rebuttal to an argument already won. So the thread is the unit
+and the *whole exchange* is the question:
+
+```
+   ┌─ thread ──────────────────────────────────────┐
+   │  anchor        ◀── first comment (file, line) │
+   │  question      ◀── the whole chain            │
+   │  state         ◀── last comment's `unresolved`│
+   │  reply target  ◀── last comment's id          │
+   └───────────────────────────────────────────────┘
+```
+
+Threads are linear in practice but the model permits branching (two replies to
+one parent); tiebreak on max `updated`.
+
+**Patchset age is a separate axis, and it was missing entirely.** `CommentInfo`
+carries `patch_set`, and an unresolved comment from patchset 2 on a change now at
+patchset 5 still arrives. Its line anchor addresses code three patchsets gone —
+the §7 anchor-drift problem, except caused by edits nobody in this session made.
+v0 triages current-patchset threads only and **reports the count of older ones
+skipped**, applying §9's rule at the fetch layer: a skipped thing must never look
+like an absent thing. Resolving old anchors by fetching the file at the comment's
+own revision is the natural v1.
+
+**Provenance.** Drafts are excluded — unpublished, nobody has seen them. Your own
+threads and robot comments (`/robotcomments`) are **in**. Two consequences the
+scope grew by: robot comments are a second endpoint with a distinct shape
+(`robot_id`, `url`, `fix_suggestions` — Gerrit's own machine-applicable fixes,
+plausibly better apply-turn input than prose), and rejected robot threads still
+get drafted replies, which is uniform with every other thread and leaves a
+readable record on the change of why a linter finding was dismissed.
+
+Note the self-authored filter is **thread-level**: exclude threads you *started*,
+never comments you wrote. Filtering your own comments would drop your reply from
+someone else's thread and take the thread's true state with it.
+
+### `verify` is prose, and the dry run proves why
+
+`open-decisions.md` framed this as a security trade: executing `verify` reopens
+arbitrary command execution immediately after §5 stripped shell access. True, but
+the decisive evidence is what the dry run's "self-clearing" dependencies actually
+*were* — findings #2 and #3, both probes against the `claude` CLI itself:
+
+```
+   the one measured case of a self-clearing dependency:
+     "run `claude -p --output-format json …` and read what comes back"
+
+     auto-executed ──▶ the verdict pass silently forks a BILLABLE
+                       subprocess out of a model-authored string
+     shown to human ─▶ they run it, they judge it
+```
+
+The canonical example is therefore the worst possible candidate for silent
+execution. `verify` is human-facing text in v0, rendered in triage beside the
+justification, and `claude-driver`'s no-shell guarantee stays literally true.
+
+The convenience this costs is smaller than it looks, because the verdict prompt
+now reads the written-down context up front (§7) — so the dependencies that a
+file read could have settled never become `depends_on` entries in the first
+place. What remains is the residue that genuinely needs a human, which is exactly
+what should reach one.
 
 ## 9. Verdicts rest on facts the code does not contain
 
@@ -410,8 +587,10 @@ the gap. Two properties showed up in practice:
   covering three verdicts — so triage shows a short go-find-out list, not 12
   separate shrugs.
 - **Some are self-clearing.** Two commands settled one cluster, and all three
-  verdicts held. The field separates doubt the tool can resolve itself from doubt
-  that needs a human.
+  verdicts held. The field separates doubt that a command could settle from doubt
+  needing judgment — but Remendo **never runs that command itself**; `verify` is
+  prose for the human. See §13, which examines what those two commands actually
+  were and why auto-executing them would have been the worst possible case.
 
 **Why this needs the driver.** Enforcement is the mechanism. `--json-schema` with
 `depends_on` in `required` means the field structurally cannot be dropped; a
@@ -626,13 +805,12 @@ queue and forces two things §3's sketch did not have:
 
 ## 12. Open threads (next design tasks, not part of this change's build)
 
-> **See also `open-decisions.md`** in this change directory. It catalogues what is
-> *undefined rather than merely unbuilt* — the decisions that block the first
-> commit (Gerrit configuration, worktree topology), the ones where guessing ships
-> silently wrong behaviour (Gerrit thread semantics, comment provenance), and the
-> ones `config.yaml`'s own rules require but no artifact has done yet (trait
-> surfaces, error model). The threads listed *below* are the safe-to-discover
-> remainder.
+> **See also `open-decisions.md`** in this change directory. Its Tiers 1–3 —
+> Gerrit configuration, worktree topology, thread semantics, comment provenance,
+> the verdict schema, and whether `verify` is executed — were **settled on
+> 2026-08-05** and now live in §13. What remains open there is Tier 4 (trait
+> surfaces, error model), Tier 5 (cost per change), and Tier 6. The threads listed
+> *below* are the safe-to-discover remainder.
 
 0. ~~Strategic GO/NO-GO (Z0–Z3).~~ **RESOLVED — Z3**, see §10.
 1. ~~Resume-across-permission-modes check.~~ **DONE** (verified against `claude`
@@ -642,10 +820,18 @@ queue and forces two things §3's sketch did not have:
 2. **Prompt prose tuning.** Roles, scoping flags, I/O contracts, and granularity
    are settled (§7); the remaining task is the exact wording and how much
    surrounding code each turn is shown.
-3. **Gerrit auth mechanism** (cookie / HTTP password / .netrc) — pin during
-   implementation of `gerrit-client`.
-4. **Resumable review sessions** (worktree + a small state file) — a v1 nicety
-   the worktree model already makes cheap.
+3. ~~Gerrit auth mechanism (cookie / HTTP password / .netrc).~~ **RESOLVED —
+   `git credential fill`**, see §13. Remendo picks no mechanism; it asks git,
+   which already knows.
+4. ~~Resumable review sessions.~~ **PARTIALLY RESOLVED** — relaunch reuses the
+   worktree and a `(change, revision)`-keyed verdict cache (§13). Triage
+   decisions and drafted replies are still redone by hand; persisting those is
+   the remaining v1 nicety.
+9. **Robot comment `fix_suggestions`.** Gerrit robot comments can carry
+   machine-applicable fixes. Now that robot comments are in scope (§13), whether
+   an accepted robot thread should apply its supplied fix rather than spend an
+   apply turn is an open design question — and a cost question, since it would
+   skip a Claude turn entirely.
 5. **Phase 2 panel geometry** (§11). `diff_view.rs` is side-by-side and wants the
    width; Phase 1 already spends it on tree + document + verdict. Options: keep the
    geometry fixed and render a *unified* diff in the right pane (gives up the

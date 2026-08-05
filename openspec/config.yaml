@@ -28,8 +28,42 @@ context: |
     `structured_output`, `--tools`, inline `--json-schema` and
     resume-across-permission-modes are CLI surface, NOT a stable API. Re-probe on
     upgrade; do not assume from documentation or memory.
-  - GERRIT AUTH is still undecided (cookie / HTTP password / .netrc) — pin it
-    during `gerrit-client` implementation.
+  - GERRIT AUTH IS `git credential fill` (settled 2026-08-05). Remendo stores no
+    secret and parses no `.netrc`; it asks git, which already knows — inheriting
+    keychains, credential helpers, gitcookies and corporate SSO along with it.
+    Consequence: credentials live on the GIT trait, not the Gerrit trait.
+  - CWD MUST BE INSIDE A CLONE of the change's project (settled 2026-08-05). A
+    change id names no repository, so this one constraint supplies the clone, the
+    Gerrit base URL (from `origin`, overridable) and the credential. Base-URL
+    derivation is a default, not a guarantee — a Gerrit under a URL subpath is not
+    recoverable from the remote, so failures must report the URL they derived.
+  - THE TRIAGE UNIT IS A THREAD, NOT A COMMENT (settled 2026-08-05). Thread state
+    is the LAST comment's `unresolved` flag; filtering per-comment re-opens
+    settled threads. The whole exchange is what gets adjudicated, because an open
+    thread's live request is frequently its last comment, not its first.
+  - VERDICTS CARRY NO CONFIDENCE FIELD (settled 2026-08-05). The dry run measured
+    9 of 12 context-dependent verdicts filed as confident, so the grade pointed
+    away from what the human needs. `depends_on` is the signal instead — naming no
+    fact versus three is checkable, a self-assessed grade is not.
+  - `depends_on.verify` IS NEVER EXECUTED (settled 2026-08-05). It is prose for a
+    human. The one measured "self-clearing" dependency was a probe invoking the
+    `claude` CLI itself, so auto-running it would have had the verdict pass spawn
+    billable subprocesses from a model-authored string.
+  - UBUNTU 20.04 IS THE SUPPORT FLOOR (glibc 2.31), same as vybim. A team fact,
+    not a technical one: teammates run 20.04, so a binary that only starts on
+    24.04 is unusable team-wide. Three consequences, all cheap if honoured up
+    front and expensive to retrofit:
+      · TLS via rustls, never `native-tls`/`openssl` — 20.04 ships OpenSSL 1.1.1
+        and 24.04 ships 3.0, so an OpenSSL-linked binary breaks across that line.
+      · Release builds use `cargo zigbuild --target
+        x86_64-unknown-linux-gnu.2.31` with an `objdump -T` guard failing the
+        build on any newer GLIBC symbol. Lift both verbatim from vybim's
+        `.github/workflows/release.yml` and its archived
+        `linux-glibc-2-31-baseline` change; zig also compiles the tree-sitter C
+        grammars against the 2.31 headers.
+      · Remendo shells out to `claude` and `git`, so the floor is not only ours:
+        both must run on 20.04 too (its git is 2.25.1). Unverified — see
+        tasks.md 8.6.
 
   === Code style ===
   - Functions: 4–20 lines. Split if longer.

@@ -54,20 +54,39 @@ and the per-turn confirm-diff, which is what the user actually approves.
 
 ### Requirement: Structured verdict output
 The application SHALL request verdicts as schema-validated structured output, each
-verdict carrying at least an adjudication of `agree`, `disagree`, or `unsure`, a
-justification, and a `depends_on` field (see below), so the UI consumes structured
-data rather than parsing prose.
+verdict carrying a comment id, an adjudication of `agree`, `disagree`, or `unsure`,
+a justification, and a `depends_on` field (see below), so the UI consumes
+structured data rather than parsing prose.
+
+The schema SHALL NOT carry a self-reported confidence field. Measured over the
+dry run's 40-comment set, 9 of the 12 verdicts that rested on an out-of-code fact
+were filed as confident — the score was not merely imprecise but pointed away from
+the property the human needs. `depends_on` conveys the same information in a form
+the model cannot inflate: naming no fact and naming three facts are checkable
+statements where a confidence grade is not.
 
 #### Scenario: A verdict is returned as structured data
 - **WHEN** the verdict turn adjudicates a comment
-- **THEN** it returns a structured result containing an `agree`/`disagree`/
-  `unsure` value and a justification
+- **THEN** it returns a structured result containing the comment id, an
+  `agree`/`disagree`/`unsure` value, and a justification
+
+#### Scenario: No confidence grade is requested or consumed
+- **WHEN** the verdict schema is constructed
+- **THEN** it defines no confidence field, and the triage UI presents none
 
 ### Requirement: Verdicts declare their out-of-code dependencies
 The verdict schema SHALL carry a **required** `depends_on` field, nullable but not
 omittable, naming any fact outside the code that the verdict rests on — CI
 configuration, tool versions, team convention, roadmap, ticket identifiers. A
 verdict that genuinely needs nothing beyond the code SHALL state `null`.
+
+`depends_on` SHALL be an **array** of dependency objects when non-null, each
+carrying the fact itself, its kind, how a human could settle it, and what the
+verdict would become if the fact resolved the other way. A single verdict can rest
+on more than one fact, and the dry run measured 12 verdicts collapsing onto 10
+distinct facts — a many-to-many relation that a singular field cannot express.
+Collapsing repeated facts into one shared dependency is an application concern, so
+the schema stays per-verdict.
 
 Requiring the field makes "I had no way to know this" a declared position rather
 than a silent omission, and makes fabricating an unknown value (an invented ticket
@@ -88,6 +107,53 @@ unknown-unknowns.
 #### Scenario: The field cannot be skipped
 - **WHEN** the verdict turn returns a result omitting `depends_on`
 - **THEN** the result fails schema validation and is not presented as a verdict
+
+#### Scenario: A verdict resting on two facts declares both
+- **WHEN** the verdict turn adjudicates a comment whose correctness depends on more
+  than one fact absent from the code
+- **THEN** `depends_on` carries an entry per fact rather than collapsing them into
+  a single statement
+
+### Requirement: A dependency's verification is never executed
+The application SHALL treat a dependency's verification instruction as text
+presented to the human, and SHALL NOT execute it, in whole or in part, as a
+command. This holds regardless of how executable the instruction appears.
+
+Executing it would reintroduce arbitrary command execution derived from model
+output immediately after apply turns were restricted to read and edit tooling to
+remove exactly that. The dry run's only measured instance of a self-clearing
+dependency was a pair of probes invoking the `claude` CLI itself, so honouring the
+instruction automatically would have had the verdict pass silently spawn billable
+subprocesses from a model-authored string — making the canonical example the worst
+available candidate for automation.
+
+The convenience forgone is bounded, because the verdict turn is instructed to read
+the project's written-down context before adjudicating (see below), which settles
+the dependencies a file read could have settled before they are ever declared.
+
+#### Scenario: A verification instruction is displayed, not run
+- **WHEN** a verdict declares a dependency whose verification instruction reads as
+  a shell command
+- **THEN** the instruction is presented to the user as text and no process is
+  spawned from it
+
+### Requirement: The verdict turn reads recorded project context first
+The verdict turn SHALL be instructed to read the project's recorded out-of-code
+context — its OpenSpec configuration, agent instruction files, and CI
+configuration — before adjudicating, using the read tooling its permission mode
+already grants.
+
+Verdict quality tracks how much out-of-code context is written down, and much of
+what a verdict would otherwise declare as a dependency is present in the worktree
+as files. Reading them converts would-be dependencies into settled facts at no
+additional risk, leaving `depends_on` to carry the residue that genuinely requires
+a human.
+
+#### Scenario: Recorded context is consulted before adjudication
+- **WHEN** the verdict turn runs against a change in a project carrying recorded
+  convention or configuration files
+- **THEN** the turn reads them before producing verdicts, rather than declaring a
+  dependency on a fact those files already state
 
 ### Requirement: Claude CLI output is parsed as an envelope
 The application SHALL deserialize the Claude CLI's JSON output as a result

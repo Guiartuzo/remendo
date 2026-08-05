@@ -145,7 +145,19 @@ schema-enforcement one in design.md §10.
   Cheap to add later — `buffer.rs` ports with zero coupling, and `pane.rs`'s
   edit machinery is the part v0 deliberately leaves behind.
 - Multi-file / cross-file refactors; conflict resolution between edits.
-- Comment threading beyond top-level unresolved comments.
+- **Threads anchored on earlier patchsets.** v0 walks `in_reply_to` chains and
+  triages the *thread* rather than the comment (design.md §13) — that much is in
+  scope, and was previously listed here as deferred. What v0 does not do is
+  triage threads anchored on a superseded patchset: their line anchors address
+  code several revisions gone. They are skipped, and **the count is reported** so
+  the omission is visible. Resolving those anchors by fetching the file at the
+  comment's own revision is the natural v1.
+- **Robot comment `fix_suggestions`.** Robot comments *are* fetched and triaged in
+  v0. Applying the machine-readable fixes Gerrit ships with them — rather than
+  spending an apply turn — is deferred (design.md §12 item 9).
+- Persisting triage decisions and drafted replies across a relaunch. v0 caches
+  **verdicts** only, keyed by `(change, revision)`; decisions are cheap to redo,
+  verdicts cost money and re-roll differently.
 - Multi-change dashboards.
 - A live bidirectional streaming Claude session (architecture A). v0 uses
   resume-based one-shots (architecture B); streaming is a later optimization.

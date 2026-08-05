@@ -22,19 +22,33 @@ turn's payload bounded while the shared session retains context across chunks.
 - **THEN** one verdict turn is issued per file, each covering that file's comments
 
 ### Requirement: Declared verdict dependencies are surfaced during triage
-The triage UI SHALL display a verdict's `depends_on` value alongside its
+The triage UI SHALL display a verdict's `depends_on` entries alongside its
 justification, so the human sees which verdicts rest on facts outside the code
-before deciding. Where several verdicts declare the same fact, the application
-SHALL present it once as a shared dependency rather than repeating it per comment.
+before deciding. Each entry SHALL show the fact, how the user could settle it, and
+what the verdict would become if it resolved the other way. Where several verdicts
+declare the same fact, the application SHALL present it once as a shared dependency
+rather than repeating it per comment.
+
+The verification text SHALL be presented as guidance for the user to act on, and
+the UI SHALL NOT offer to execute it.
+
+Since the schema carries no confidence grade, these entries are the uncertainty
+signal the human reads: a verdict declaring no dependency and one declaring three
+differ in a way that is checkable rather than self-asserted.
 
 #### Scenario: A declared dependency is visible before the decision
 - **WHEN** the user triages a comment whose verdict declares a `depends_on` fact
-- **THEN** that fact is shown with the verdict, so the user can weigh the verdict
-  as conditional rather than as self-contained
+- **THEN** that fact is shown with the verdict, together with how to settle it and
+  what the verdict would become, so the user can weigh the verdict as conditional
+  rather than as self-contained
 
 #### Scenario: A shared dependency is presented once
 - **WHEN** several verdicts declare the same out-of-code fact
 - **THEN** it is surfaced once as a dependency covering those verdicts
+
+#### Scenario: Verification is offered as guidance only
+- **WHEN** a displayed dependency's verification text reads as a runnable command
+- **THEN** the UI presents it as text and provides no action that executes it
 
 ### Requirement: Replies are drafted and approved during triage
 The application SHALL offer a Claude-drafted reply for every comment the user
@@ -60,6 +74,39 @@ sending; scoping drafts to the both-reject case alone would never draft it.
 #### Scenario: A declined draft posts nothing
 - **WHEN** the user declines a drafted reply during triage
 - **THEN** no reply is posted for that comment at finalize
+
+#### Scenario: Rejected robot threads are drafted like any other
+- **WHEN** the user rejects a thread whose originating comment is a robot comment
+- **THEN** a reply draft is offered for it on the same terms as a human thread,
+  leaving a record on the change of why the finding was dismissed
+
+### Requirement: Triage presents threads, not isolated comments
+The triage UI SHALL present each unresolved thread as a unit, showing its comments
+in order with their authors, rather than presenting only the thread's opening
+comment. The user's decision SHALL apply to the thread as a whole.
+
+An open thread's live request is often a later comment: a reviewer raises a
+concern, the author answers, and the reviewer narrows the ask. Showing only the
+opening comment asks the human to decide a question the thread already moved past.
+
+#### Scenario: A multi-comment thread is shown in full
+- **WHEN** the user triages a thread containing a reviewer comment, an author
+  reply, and a follow-up
+- **THEN** all three are displayed in order with their authors, and one decision is
+  recorded for the thread
+
+### Requirement: Threads skipped for patchset age are reported
+The application SHALL report, at the point the change is loaded, how many
+unresolved threads were left untriaged because they are anchored on an earlier
+patchset.
+
+A change whose triage queue is shorter than its unresolved count is otherwise
+indistinguishable from a change with fewer comments, which is the same failure this
+change's `depends_on` requirement exists to prevent one level up.
+
+#### Scenario: The skipped count is visible on load
+- **WHEN** a change carries unresolved threads anchored on earlier patchsets
+- **THEN** the user is told how many were not triaged before triage begins
 
 ### Requirement: Triage view shows the document, the comment, and the verdict
 The application SHALL present triage as a document pane showing the commented

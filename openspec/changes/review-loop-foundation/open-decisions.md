@@ -1,5 +1,24 @@
 # Open decisions — `review-loop-foundation`
 
+> **STATUS (2026-08-05): Tiers 1–3 are RESOLVED.** They were worked through in one
+> session as intended. The decisions and their reasoning now live in `design.md`
+> §13 and in the specs; the tasks state them directly. Items 1–6 below are kept as
+> the record of *what was undefined and why it mattered* — read §13 for what was
+> chosen. **Tiers 4, 5 and 6 remain open.**
+>
+> | # | Decision | Outcome |
+> |---|---|---|
+> | 1 | Gerrit connection and configuration | cwd inside a clone; base URL from `origin` (overridable); auth via `git credential fill`; TLS via system store → `http.sslCAInfo` |
+> | 2 | Repository and worktree topology | worktree at `$XDG_STATE_HOME/remendo/<project>/<id>/`; relaunch **resumes**; verdicts cached on `(change, revision)` |
+> | 3 | Thread vs. comment semantics | the **thread** is the unit; state = last comment's flag; whole exchange adjudicated; reply targets the last comment |
+> | 4 | Comment provenance | exclude drafts; **include** own threads and robot comments; skip non-current-patchset threads and report the count |
+> | 5 | Verdict schema shape | `{comment_id, verdict, justification, depends_on}`; `depends_on` a nullable **array**; **`confidence` dropped** |
+> | 6 | Is `depends_on.verify` executed? | **No** — human-facing prose, never run |
+>
+> One decision reversed a prior recommendation: item 4's suggestion to exclude
+> self-authored comments and defer robot comments was **not** taken. Both are in
+> scope, which grew the change — see §13 and `design.md` §12 item 9.
+
 Things that are **undefined, not merely unbuilt**. Captured 2026-07-27, after the
 dry run and the UI design pass, so they can be worked through in one focused
 session rather than rediscovered one at a time mid-implementation.
@@ -21,7 +40,7 @@ Tiers are by *consequence of guessing*, not by effort:
 
 ---
 
-## Tier 1 — Blocks the first commit
+## Tier 1 — Blocks the first commit  ✅ RESOLVED (see `design.md` §13)
 
 ### 1. Gerrit connection and configuration
 
@@ -83,7 +102,7 @@ re-fetches and re-runs the verdict pass. The latter is simpler and re-costs mone
 
 ---
 
-## Tier 2 — Guessing produces silently wrong behaviour
+## Tier 2 — Guessing produces silently wrong behaviour  ✅ RESOLVED (see `design.md` §13)
 
 ### 3. Thread semantics vs. comment semantics
 
@@ -140,7 +159,7 @@ is to make all three choices *visible* rather than emergent.
 
 ---
 
-## Tier 3 — Blocks `claude-driver`
+## Tier 3 — Blocks `claude-driver`  ✅ RESOLVED (see `design.md` §13)
 
 ### 5. The verdict schema's concrete shape
 
@@ -207,6 +226,14 @@ Missing, though all are mandated by the dependency rules:
 | Git | the `git` CLI | — undefined |
 | Claude driver | the `claude` CLI | named, surface undefined |
 | Diff | `similar` | — undefined |
+
+**Partially answered by the Tier 1 session.** The git trait gained its first
+concrete methods: `fill_credential(host)` (decision 1 — auth is git's job, not
+Gerrit's), `remote_url`, `worktree_add`, and `config_get` for `http.sslCAInfo`.
+Its fake returns canned values for all four. The Gerrit trait's surface is now
+also more constrained than it was: threads rather than comments, plus a second
+fetch path for robot comments. The remaining work is designing the surfaces on
+purpose rather than accreting them.
 
 These method surfaces are the app's actual internal API. Worth designing on
 purpose rather than accreting them one call site at a time.
