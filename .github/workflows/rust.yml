@@ -1,0 +1,146 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer run for the same ref cancels any still-running one, so a stuck job
+# can't pile up across pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fmt:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      # The tree-sitter grammars build C — needs cc
+      - name: Install C toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: cargo clippy --all-targets -- -D warnings
+
+  # Two architectural constraints are invisible at review time and only show up
+  # as a broken binary on a teammate's box, so they are enforced here rather
+  # than remembered:
+  #
+  #   openssl / native-tls -> breaks the Ubuntu 20.04 floor, since 20.04 ships
+  #                           OpenSSL 1.1.1 and 24.04 ships 3.0
+  #   tokio                -> specs/gerrit-client requires a blocking client on
+  #                           a worker thread; an async runtime arriving as a
+  #                           transitive dep would go unnoticed otherwise
+  #   portable-pty / vt100 -> v0 embeds no terminal (proposal.md)
+  deps:
+    name: Dependency constraints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Assert forbidden crates are absent
+        run: |
+          status=0
+          for crate in tokio portable-pty vt100 openssl openssl-sys native-tls; do
+            if cargo tree -i "$crate" >/dev/null 2>&1; then
+              echo "::error::forbidden dependency '$crate' is in the tree"
+              cargo tree -i "$crate" || true
+              status=1
+            fi
+          done
+          exit $status
+
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            bin: remendo
+          - os: windows-latest
+            bin: remendo.exe
+          - os: macos-latest
+            bin: remendo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # The tree-sitter grammars build C — Linux needs gcc; the Windows (MSVC)
+      # and macOS (clang) runners already ship a C toolchain.
+      - name: Install C toolchain (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build release binary
+        run: cargo build --release --verbose
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: remendo-${{ matrix.os }}
+          path: target/release/${{ matrix.bin }}
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install C toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      # Unit tests live in the binary crate, so no `--lib`.
+      - name: Run tests
+        run: cargo test --verbose
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --quiet
+      - run: cargo audit

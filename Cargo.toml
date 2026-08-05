@@ -1,0 +1,48 @@
+[package]
+name = "remendo"
+version = "0.1.0"
+edition = "2024"
+description = "A keyboard-driven terminal cockpit for adjudicating and applying Gerrit review comments"
+license = "MIT"
+repository = "https://github.com/Guiartuzo/remendo"
+
+# The Linux support floor is Ubuntu 20.04 / glibc 2.31 (openspec/config.yaml).
+# Two dependency rules follow from it, and both are cheap now and expensive to
+# retrofit:
+#
+#   * TLS is rustls, NEVER native-tls/openssl. Ubuntu 20.04 ships OpenSSL 1.1.1
+#     and 24.04 ships 3.0, so an OpenSSL-linked binary cannot span the floor.
+#   * No async runtime. Gerrit access is a worker thread with a blocking client
+#     (specs/gerrit-client), so `tokio` must stay out of the tree entirely.
+#
+# CI enforces both — see .github/workflows/rust.yml's `deps` job, which fails on
+# tokio, portable-pty, vt100, openssl, openssl-sys or native-tls appearing.
+
+[dependencies]
+# TUI
+crossterm = "0.29.0"
+ratatui = "0.30.2"
+
+# Text buffer, diffing, and file walking (ported from vybim)
+ignore = "0.4.33"
+ropey = "1.6.1"
+similar = "3.1.2"
+
+# Syntax highlighting. These build C grammars, so a C toolchain is a build
+# requirement; zig's clang compiles them against the 2.31 headers for releases.
+tree-sitter = "0.26.11"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-highlight = "0.26.11"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+
+# Gerrit REST + the `claude` CLI's JSON envelope
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.19"
+
+# Blocking HTTP. `platform-verifier` validates against the SYSTEM root store
+# rather than ureq's bundled Mozilla roots — an internal Gerrit fronted by a
+# corporate CA is the normal case, and bundled roots reject it (design.md §13).
+ureq = { version = "3.3.0", features = ["platform-verifier"] }

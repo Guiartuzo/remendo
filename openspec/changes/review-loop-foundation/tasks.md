@@ -8,30 +8,30 @@
 
 ## 1. Project scaffold
 
-- [ ] 1.1 Initialize the Rust crate (`remendo`), edition 2024; set up CI (fmt +
+- [x] 1.1 Initialize the Rust crate (`remendo`), edition 2024; set up CI (fmt +
       clippy + test) mirroring vybim's gates.
-- [ ] 1.2 Add dependencies: `crossterm`, `ratatui`, `similar`, `ropey`, `ignore`,
+- [x] 1.2 Add dependencies: `crossterm`, `ratatui`, `similar`, `ropey`, `ignore`,
       `tree-sitter` + `tree-sitter-highlight` + grammars, `serde` (derive),
       `serde_json`, and a blocking HTTP client (`ureq` + rustls). Confirm **no**
       `tokio`, and **no** `portable-pty`/`vt100` — v0 embeds no terminal.
-- [ ] 1.3 Copy `diff_view.rs` (+ its `Theme`/`git` seams) from vybim and adapt it
+- [x] 1.3 Copy `diff_view.rs` (+ its `Theme`/`git` seams) from vybim and adapt it
       to take an arbitrary before/after text pair (pre-turn snapshot vs edit), not
       just HEAD-vs-working-tree.
-- [ ] 1.4 Copy `theme.rs`, `syntax.rs`, and `buffer.rs` from vybim. `buffer.rs`
+- [x] 1.4 Copy `theme.rs`, `syntax.rs`, and `buffer.rs` from vybim. `buffer.rs`
       ports whole (448 lines, no crate-internal deps); its mutation methods go
       unused in v0 but its file loading and line indexing are what the read-only
       viewer needs.
-- [ ] 1.5 Port the **read-only** slice of `pane.rs`: syntax-highlighted viewport
+- [x] 1.5 Port the **read-only** slice of `pane.rs`: syntax-highlighted viewport
       render, scrolling (+ its existing viewport tests), `goto_line`, and search.
       Leave behind multi-caret, insert/delete/undo, word motion and completion —
       roughly two thirds of the module (design.md §11).
-- [ ] 1.6 Copy `file_tree.rs` (357 lines, depends only on `theme`) and
+- [x] 1.6 Copy `file_tree.rs` (357 lines, depends only on `theme`) and
       `minibuffer.rs` (comment-prose input).
-- [ ] 1.7 Hold the **Ubuntu 20.04 / glibc 2.31 floor** in the dependency set: TLS
+- [x] 1.7 Hold the **Ubuntu 20.04 / glibc 2.31 floor** in the dependency set: TLS
       through rustls only — never `native-tls`/`openssl`, which breaks across
       20.04's OpenSSL 1.1.1 and 24.04's 3.0. This constrains 1.2's choice of HTTP
       client; it is not a separate step but a veto over it.
-- [ ] 1.8 Release job: `cargo zigbuild --target x86_64-unknown-linux-gnu.2.31`
+- [x] 1.8 Release job: `cargo zigbuild --target x86_64-unknown-linux-gnu.2.31`
       plus the `objdump -T` guard that fails on any GLIBC symbol above 2.31.
       Lift both verbatim from vybim's `release.yml` (archived change
       `2026-07-09-linux-glibc-2-31-baseline`); pin Zig, it is pre-1.0. Needed
