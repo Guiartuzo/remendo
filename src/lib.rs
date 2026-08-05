@@ -18,6 +18,7 @@ pub mod git;
 pub mod minibuffer;
 pub mod pane;
 pub mod search;
+pub mod submit;
 pub mod syntax;
 pub mod theme;
 pub mod workspace;

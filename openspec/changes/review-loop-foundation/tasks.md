@@ -281,16 +281,16 @@
 
 ## 7. Finalize (`change-submission`)
 
-- [ ] 7.1 Pre-push check: re-GET the change and abort unless `current_revision`
+- [x] 7.1 Pre-push check: re-GET the change and abort unless `current_revision`
       still matches the revision checked out in the worktree. Report both
       revisions on mismatch; push nothing.
-- [ ] 7.2 `git commit --amend` the staged edits into one commit, rewriting the
+- [x] 7.2 `git commit --amend` the staged edits into one commit, rewriting the
       commit message if a `/COMMIT_MSG` comment was accepted (so not a blanket
       `--amend --no-edit`); push to `refs/for/<branch>` with `<branch>` taken from
       the change's `branch` field — the worktree is on a detached HEAD with no
       local branch to read.
-- [ ] 7.3 Push rejected → surface, keep worktree, do nothing else.
-- [ ] 7.4 Push ok → issue the **single** batched review POST from 2.6 carrying
+- [x] 7.3 Push rejected → surface, keep worktree, do nothing else.
+- [x] 7.4 Push ok → issue the **single** batched review POST from 2.6 carrying
       every comment fate: accepted → `unresolved: false`; **fixed-by-hand →
       `unresolved: false`** (indistinguishable from accepted at this layer);
       rejected+replied → reply text + `unresolved: true`; skipped → omitted

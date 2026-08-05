@@ -71,6 +71,25 @@ impl CommentAnchor {
     pub fn is_editable_file(&self) -> bool {
         matches!(self, CommentAnchor::File(_))
     }
+
+    /// The path string Gerrit addresses this anchor by, for posting back.
+    ///
+    /// The inverse of [`classify`](Self::classify). Distinct from
+    /// [`file_path`](Self::file_path) on purpose: this one always yields a
+    /// string, so it must never be used to reach the filesystem.
+    ///
+    /// ```
+    /// # use remendo::gerrit::anchor::CommentAnchor;
+    /// assert_eq!(CommentAnchor::CommitMessage.gerrit_path(), "/COMMIT_MSG");
+    /// assert_eq!(CommentAnchor::classify("a.rs").gerrit_path(), "a.rs");
+    /// ```
+    pub fn gerrit_path(&self) -> &str {
+        match self {
+            CommentAnchor::File(path) => path,
+            CommentAnchor::CommitMessage => COMMIT_MSG_PATH,
+            CommentAnchor::ChangeLevel => PATCHSET_LEVEL_PATH,
+        }
+    }
 }
 
 /// Map a comment's line number on Gerrit's rendered commit message onto a line
@@ -133,6 +152,22 @@ mod tests {
         // so these are ordinary files rather than pseudo-paths.
         assert!(CommentAnchor::classify("COMMIT_MSG").is_editable_file());
         assert!(CommentAnchor::classify("docs/COMMIT_MSG.md").is_editable_file());
+    }
+
+    #[test]
+    fn classification_round_trips_through_the_gerrit_path() {
+        for path in ["src/a.rs", "/COMMIT_MSG", "/PATCHSET_LEVEL"] {
+            assert_eq!(CommentAnchor::classify(path).gerrit_path(), path);
+        }
+    }
+
+    /// `gerrit_path` always yields a string and `file_path` does not; the split
+    /// is what keeps a pseudo-path postable but never openable.
+    #[test]
+    fn a_postable_path_is_not_an_openable_path() {
+        let anchor = CommentAnchor::ChangeLevel;
+        assert_eq!(anchor.gerrit_path(), "/PATCHSET_LEVEL");
+        assert_eq!(anchor.file_path(), None);
     }
 
     #[test]
