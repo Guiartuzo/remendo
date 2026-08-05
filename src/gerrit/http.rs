@@ -108,7 +108,10 @@ impl GerritHttp {
 
 impl GerritApi for GerritHttp {
     fn change(&self, change_id: &str) -> Result<ChangeInfo, GerritError> {
-        let path = format!("changes/{change_id}{CURRENT_REVISION_OPTS}");
+        let path = format!(
+            "changes/{}{CURRENT_REVISION_OPTS}",
+            encode_segment(change_id)
+        );
         self.get(&path).map_err(|err| match err {
             // Gerrit answers 404 for both "no such change" and "not visible to
             // you"; it deliberately does not distinguish them, and neither can we.
@@ -120,7 +123,7 @@ impl GerritApi for GerritHttp {
     }
 
     fn comments(&self, change_id: &str) -> Result<HashMap<String, Vec<Comment>>, GerritError> {
-        self.get(&format!("changes/{change_id}/comments"))
+        self.get(&format!("changes/{}/comments", encode_segment(change_id)))
     }
 
     fn robot_comments(
@@ -130,14 +133,20 @@ impl GerritApi for GerritHttp {
         // Not every Gerrit deployment serves this endpoint. A 404 here means
         // "no robot comments", not a failed fetch — erroring would make robot
         // support a hard requirement on every server.
-        match self.get(&format!("changes/{change_id}/robotcomments")) {
+        match self.get(&format!(
+            "changes/{}/robotcomments",
+            encode_segment(change_id)
+        )) {
             Err(GerritError::HttpStatus { status: 404, .. }) => Ok(HashMap::new()),
             other => other,
         }
     }
 
     fn post_review(&self, change_id: &str, review: &ReviewInput) -> Result<(), GerritError> {
-        let url = self.url_for(&format!("changes/{change_id}/revisions/current/review"));
+        let url = self.url_for(&format!(
+            "changes/{}/revisions/current/review",
+            encode_segment(change_id)
+        ));
         ureq::post(&url)
             .header("Authorization", &self.authorization)
             .header("Content-Type", "application/json")
@@ -166,6 +175,27 @@ fn is_certificate_failure(message: &str) -> bool {
 fn ensure_trailing_slash(base_url: &str) -> String {
     let trimmed = base_url.trim_end_matches('/');
     format!("{trimmed}/")
+}
+
+/// Percent-encode one URL path segment.
+///
+/// Gerrit accepts a change id in three forms, and the triple form
+/// `project~branch~ChangeId` embeds the project — which legitimately contains
+/// `/`. Interpolated raw, `platform/base~main~I0abc` silently becomes two path
+/// segments and addresses a change that does not exist. Unreserved characters
+/// (RFC 3986: ALPHA / DIGIT / `-` `.` `_` `~`) pass through, so numeric ids and
+/// `I0abc…` ids are untouched.
+fn encode_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(byte as char)
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -199,6 +229,34 @@ mod tests {
             client.url_for("changes/1"),
             "https://corp.com/gerrit/a/changes/1"
         );
+    }
+
+    /// Gerrit's triple-form change id embeds the project, which contains `/`.
+    /// Raw, it becomes extra path segments and addresses nothing.
+    #[test]
+    fn a_triple_form_change_id_is_percent_encoded() {
+        // The project's `/` becomes %2F, but the `~` separators stay raw: they
+        // are unreserved in RFC 3986 and are Gerrit's own delimiter, so
+        // encoding them would break the id Gerrit is trying to parse.
+        assert_eq!(
+            encode_segment("platform/base~main~I0abc"),
+            "platform%2Fbase~main~I0abc"
+        );
+    }
+
+    #[test]
+    fn ordinary_change_ids_pass_through_untouched() {
+        assert_eq!(encode_segment("12345"), "12345");
+        assert_eq!(
+            encode_segment("I0123456789abcdef0123456789abcdef01234567"),
+            "I0123456789abcdef0123456789abcdef01234567"
+        );
+    }
+
+    #[test]
+    fn characters_that_would_break_a_url_are_encoded() {
+        assert_eq!(encode_segment("a?b#c d"), "a%3Fb%23c%20d");
+        assert_eq!(encode_segment("100%"), "100%25");
     }
 
     #[test]
