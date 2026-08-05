@@ -12,9 +12,13 @@
 //! the untestable surface is composition and colour rather than behaviour.
 
 pub mod keys;
+pub mod render;
 pub mod terminal;
+pub mod tree;
 
 pub use keys::action_for;
+pub use render::draw;
+pub use tree::TreeEntry;
 
 use crate::gerrit::ChangeInfo;
 use crate::minibuffer::Minibuffer;
@@ -66,6 +70,50 @@ pub enum Outcome {
     Finished(Vec<TriagedThread>),
     /// The user aborted. The worktree and any confirmed edits stay put.
     Aborted,
+}
+
+/// How long a frame waits for input before redrawing anyway.
+///
+/// The redraw rebuilds the document from the worktree, so an edit made in the
+/// user's own editor appears within this window without any file watching
+/// (`tasks.md` 5.10). The pane is read-only, so there is no in-application
+/// buffer to reconcile and a reload can never prompt about a conflict.
+const FRAME_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Run the triage UI until the user finishes or aborts.
+///
+/// Takes over the terminal and always hands it back — on a normal exit, on an
+/// error, and on a panic (see [`terminal`]).
+pub fn run(
+    app: &mut App,
+    files: &impl crate::apply::WorktreeFiles,
+    commit_message: &str,
+    theme: &crate::theme::Theme,
+) -> std::io::Result<Outcome> {
+    use ratatui::crossterm::event::{self, Event};
+
+    let mut tui = terminal::init()?;
+    let result = (|| -> std::io::Result<Outcome> {
+        while app.is_running() {
+            // Rebuilt each frame from the worktree, which is what picks up an
+            // external edit.
+            let document = app.current_document(commit_message, files);
+            tui.draw(|frame| render::draw(frame, app, &document, theme))?;
+
+            if !event::poll(FRAME_TIMEOUT)? {
+                continue;
+            }
+            if let Event::Key(key) = event::read()?
+                && key.is_press()
+                && let Some(action) = action_for(key, app.mode)
+            {
+                app.handle(action);
+            }
+        }
+        Ok(app.outcome().clone())
+    })();
+    terminal::restore()?;
+    result
 }
 
 /// The triage application's state.
@@ -140,6 +188,31 @@ impl App {
 
     pub fn is_running(&self) -> bool {
         self.outcome == Outcome::Running
+    }
+
+    /// The document the thread under the cursor is anchored to.
+    ///
+    /// Rebuilt on demand rather than cached, so a file edited in the user's own
+    /// editor is picked up on the next redraw.
+    pub fn current_document(
+        &self,
+        commit_message: &str,
+        files: &impl crate::apply::WorktreeFiles,
+    ) -> crate::triage::Document {
+        match self.triage.current() {
+            Some(item) => crate::triage::Document::for_thread(
+                &item.thread,
+                &self.change,
+                commit_message,
+                files,
+            ),
+            None => crate::triage::Document {
+                title: "no threads".to_string(),
+                lines: vec!["Nothing to triage on the current patchset.".to_string()],
+                anchor_line: None,
+                highlighted: false,
+            },
+        }
     }
 
     /// The out-of-code facts the current verdicts rest on, collapsed so a fact

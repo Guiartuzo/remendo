@@ -223,41 +223,48 @@
 - [ ] 5.1 Run the verdict pass on load, one turn per file; hold verdicts alongside
       threads. Load from the (change, revision) cache (3.5) when it hits, so a
       relaunch does not re-spend or re-roll the pass.
-- [ ] 5.1b Report the count of threads skipped for patchset age (2.9) at load,
+      **BLOCKED on §4** (the gate at 4.11). The UI already carries verdicts and
+      states an absent one as UNADJUDICATED rather than as an empty verdict, so
+      only the pass itself is missing.
+- [x] 5.1b Report the count of threads skipped for patchset age (2.9) at load,
       before triage begins. A queue shorter than the change's unresolved count
       must not read as a change with fewer comments.
-- [ ] 5.2 Layout: [file tree | document + comment | verdict + justification], tree
+- [x] 5.2 Layout: [file tree | document + comment | verdict + justification], tree
       toggleable with a keystroke.
-- [ ] 5.3 Document pane: render the anchored document read-only with syntax
+- [x] 5.3 Document pane: render the anchored document read-only with syntax
       highlighting and the comment's line/range highlighted in place. The document
       is polymorphic — source file, commit message (`/COMMIT_MSG`), or a synthetic
       change-overview (`/PATCHSET_LEVEL`).
-- [ ] 5.4 File tree annotated per file with comment count + triage progress;
+- [x] 5.4 File tree annotated per file with comment count + triage progress;
       `/COMMIT_MSG` and `/PATCHSET_LEVEL` appear as entries marked as non-files.
-- [ ] 5.5 Keybindings: accept / reject / defer / fixed-by-hand / edit-prose /
+- [x] 5.5 Keybindings: accept / reject / defer / fixed-by-hand / edit-prose /
       next / prev / next-undecided / toggle-tree. Record the per-comment decision
       (human decision overrides the verdict).
-- [ ] 5.6 Edit-prose flow (via `minibuffer`) feeds the edited text into the later
+- [x] 5.6 Edit-prose flow (via `minibuffer`) feeds the edited text into the later
       apply turn.
-- [ ] 5.7 Surface each verdict's `depends_on` entries next to its justification —
+- [x] 5.7 Surface each verdict's `depends_on` entries next to its justification —
       `fact`, `verify`, and `flips_to` — collapsing the same fact declared by
       several verdicts into one shared dependency rather than repeating it per
       comment. With no `confidence` field, these entries **are** the uncertainty
       signal. Render `verify` as text with **no action that runs it** (4.10).
-- [ ] 5.7b Document pane shows the **whole thread** in order with authors, and one
+- [x] 5.7b Document pane shows the **whole thread** in order with authors, and one
       decision is recorded for the thread. The live ask is often the last comment,
       not the first.
 - [ ] 5.8 Reply drafting and approval happen **here**, at the end of triage — a
       draft offered for every rejected thread including robot threads, each
       approved / edited / declined before finalize starts, so Phase 3 needs no
       human input.
-- [ ] 5.9 Triage completion gate: an explicit action ends triage, reporting how
+      **APPROVAL is built; DRAFTING is blocked on §4** (4.6). The reply pass
+      prompts for every rejection and records approved / declined, and the gate
+      diverts into it rather than closing over an unanswered reply — but the
+      text is typed by hand until the driver can draft it.
+- [x] 5.9 Triage completion gate: an explicit action ends triage, reporting how
       many comments are still undecided; confirming the gate maps those to the
       skipped fate. Navigating past the last comment SHALL NOT end triage.
-- [ ] 5.10 Detect on-disk changes to worktree files and re-read them (no conflict
+- [x] 5.10 Detect on-disk changes to worktree files and re-read them (no conflict
       prompt — the pane is read-only). Invalidate any pending confirm-diff whose
       file changed underneath it.
-- [ ] 5.11 Make the worktree path obtainable mid-review, for the
+- [x] 5.11 Make the worktree path obtainable mid-review, for the
       fix-in-your-own-editor path.
 
 ## 6. Apply + confirm (`fix-application`)

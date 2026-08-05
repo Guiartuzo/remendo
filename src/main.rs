@@ -9,8 +9,15 @@
 
 use std::process::ExitCode;
 
-use remendo::gerrit::{GerritEvent, GerritHttp, GerritRequest, GerritWorker, base_url};
+use remendo::app::{self, App, Outcome};
+use remendo::apply::RealWorktree;
+use remendo::gerrit::{
+    GerritEvent, GerritHttp, GerritRequest, GerritWorker, LoadedChange, base_url,
+};
 use remendo::git::{GitCli, GitCommand};
+use remendo::submit::{Fate, TriagedThread};
+use remendo::theme::Theme;
+use remendo::triage::Triage;
 use remendo::workspace::{self, paths};
 
 fn main() -> ExitCode {
@@ -59,14 +66,80 @@ fn run() -> Result<(), String> {
     }) {
         return Err("the Gerrit worker stopped before it could be asked".into());
     }
-    match worker.wait() {
-        Some(GerritEvent::ChangeLoaded(loaded)) => report_threads(&loaded),
+    let loaded = match worker.wait() {
+        Some(GerritEvent::ChangeLoaded(loaded)) => loaded,
         Some(GerritEvent::Failed(err)) => return Err(err.to_string()),
         Some(GerritEvent::ReviewPosted) | None => {
             return Err("the Gerrit worker stopped without loading the change".into());
         }
+    };
+    report_threads(&loaded);
+    if loaded.is_empty() {
+        // Exiting gracefully rather than opening an empty UI (design.md §14).
+        return Ok(());
+    }
+
+    triage(&workspace, *loaded)
+}
+
+/// Run the triage UI over a loaded change and report what came out of it.
+///
+/// The verdict pass is **not** wired: `claude-driver` is §4, gated on task 4.11
+/// until the CLI is re-probed against 2.1.222. Every thread therefore arrives
+/// unadjudicated, which the UI states explicitly rather than showing as an
+/// empty verdict.
+fn triage(workspace: &workspace::Workspace, loaded: LoadedChange) -> Result<(), String> {
+    let worktree = workspace.worktree();
+    let files = RealWorktree::new(&worktree);
+    let mut app = App::new(
+        Triage::new(
+            loaded.threads.threads,
+            &[],
+            loaded.threads.skipped_older_patchsets,
+        ),
+        loaded.change,
+        worktree.display().to_string(),
+    );
+
+    let outcome = app::run(
+        &mut app,
+        &files,
+        &workspace.change.subject,
+        &Theme::default(),
+    )
+    .map_err(|e| format!("terminal error: {e}"))?;
+
+    match outcome {
+        Outcome::Finished(fates) => {
+            report_fates(&fates);
+            // Apply (§6) and finalize (§7) are built and tested, but wiring
+            // them here needs the apply turn, which is the same §4 gate.
+            println!(
+                "\nApplying and pushing needs the Claude driver (§4), which is gated on \
+                 re-probing the CLI — see tasks.md 4.11. Nothing was pushed."
+            );
+        }
+        Outcome::Aborted => println!("\n{}", workspace.abort_report()),
+        Outcome::Running => unreachable!("run returns only once the app has stopped"),
     }
     Ok(())
+}
+
+/// Summarize what triage decided.
+fn report_fates(fates: &[TriagedThread]) {
+    let mut resolved = 0;
+    let mut replied = 0;
+    let mut untouched = 0;
+    for item in fates {
+        match &item.fate {
+            Fate::Accepted | Fate::FixedByHand => resolved += 1,
+            Fate::Rejected { reply: Some(_) } => replied += 1,
+            Fate::Rejected { reply: None } | Fate::Skipped => untouched += 1,
+        }
+    }
+    println!(
+        "triage complete: {resolved} to resolve, {replied} to reply to, {untouched} left alone"
+    );
 }
 
 /// Build a Gerrit client from the clone: origin remote → base URL → credential.
