@@ -10,8 +10,10 @@
 //! module says so at its divergence point, so the two can be diffed later if a
 //! `vybim-core` crate is ever extracted.
 
+pub mod apply;
 pub mod buffer;
 pub mod diff_view;
+pub mod driver;
 pub mod file_tree;
 pub mod gerrit;
 pub mod git;

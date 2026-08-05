@@ -112,6 +112,27 @@ impl DiffView {
         self.scroll
     }
 
+    /// The text of every changed row, added and removed alike.
+    ///
+    /// Exists so a caller can assert *what* a confirm-diff puts in front of the
+    /// reviewer — the property that matters when the left side is a pre-turn
+    /// snapshot rather than the patchset baseline.
+    ///
+    /// ```
+    /// # use remendo::diff_view::DiffView;
+    /// let view = DiffView::new("a.rs", "keep\nold\n", "keep\nnew\n");
+    /// assert_eq!(view.changed_lines(), vec!["old".to_string(), "new".to_string()]);
+    /// ```
+    pub fn changed_lines(&self) -> Vec<String> {
+        self.rows
+            .iter()
+            .filter_map(|row| match row {
+                DiffRow::Delete(text) | DiffRow::Insert(text) => Some(text.clone()),
+                DiffRow::Equal(_) => None,
+            })
+            .collect()
+    }
+
     // --- navigation --------------------------------------------------------
 
     pub fn scroll_up(&mut self) {

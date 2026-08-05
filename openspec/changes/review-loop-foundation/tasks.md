@@ -138,6 +138,10 @@
 
 - [ ] 4.1 Generate a session UUID per change; spawn-wait-parse wrapper around
       `claude -p` (the `git.rs` shape), behind the project's own driver trait.
+      **The trait, `Envelope`, `SessionId` and `FakeDriver` already exist** —
+      built during §6, which needed something to apply edits through. What
+      remains here is the REAL implementation that spawns `claude`, and that is
+      what 4.11's gate covers.
 - [ ] 4.2 Envelope decoding: `--output-format json` returns a **result envelope**,
       not the payload. Deserialize it, gate on `is_error`, and read the payload
       from `structured_output` (a native object) — not from `result` (the same
@@ -258,25 +262,25 @@
 
 ## 6. Apply + confirm (`fix-application`)
 
-- [ ] 6.1 After triage, iterate accepted comments with a real file anchor; issue a
+- [x] 6.1 After triage, iterate accepted comments with a real file anchor; issue a
       scoped apply turn per comment (preserving order within a file). Accepted
       `/COMMIT_MSG` comments go to 7.2 instead; `/PATCHSET_LEVEL` never gets an
       apply turn.
-- [ ] 6.2 **Snapshot the file immediately before each apply turn.** This pre-turn
+- [x] 6.2 **Snapshot the file immediately before each apply turn.** This pre-turn
       snapshot — not the patchset baseline — is the reference for both the
       confirm-diff and the revert. For the first comment in a file the two are the
       same; for every later one they differ.
-- [ ] 6.3 Render the confirm-diff (**pre-turn snapshot** vs edit) in the two
+- [x] 6.3 Render the confirm-diff (**pre-turn snapshot** vs edit) in the two
       panels; require explicit confirmation before the edit is kept. Diffing
       against the patchset would show earlier confirmed edits and hide what the
       reviewer is actually approving.
-- [ ] 6.4 Reject → restore the pre-turn snapshot, then re-run the apply turn with
+- [x] 6.4 Reject → restore the pre-turn snapshot, then re-run the apply turn with
       an added hint, or skip the comment. **NOT `git checkout -- <file>`** — that
       restores the patchset baseline and destroys edits already confirmed for
       earlier comments in the same file.
-- [ ] 6.5 On confirm, `git add` the file and keep the edit in the worktree;
+- [x] 6.5 On confirm, `git add` the file and keep the edit in the worktree;
       accumulate across comments; push nothing yet.
-- [ ] 6.6 Regression test: confirm comment 1 on a file, apply then reject comment 2
+- [x] 6.6 Regression test: confirm comment 1 on a file, apply then reject comment 2
       on the same file, assert comment 1's edit survives.
 
 ## 7. Finalize (`change-submission`)
