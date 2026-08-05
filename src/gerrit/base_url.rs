@@ -70,6 +70,31 @@ pub fn host_of(base_url: &str) -> Option<&str> {
     Some(host)
 }
 
+/// The Gerrit project a remote URL points at.
+///
+/// Used to check the change's `project` against the clone the user launched in
+/// — a change id names no repository, so this is the only thing standing between
+/// a reviewer and a worktree built from the wrong repo (design.md §13).
+///
+/// ```
+/// # use remendo::gerrit::base_url::project_of;
+/// assert_eq!(project_of("https://gerrit.corp/a/platform/base").unwrap(), "platform/base");
+/// assert_eq!(project_of("ssh://me@gerrit.corp:29418/tools.git").unwrap(), "tools");
+/// ```
+pub fn project_of(remote_url: &str) -> Option<String> {
+    let (_scheme, rest) = remote_url.split_once("://")?;
+    let rest = rest.rsplit_once('@').map_or(rest, |(_user, host)| host);
+    let (_authority, path) = rest.split_once('/')?;
+
+    // Everything after `/a/` is the project; without it, the whole path is.
+    let project = match path.find(AUTH_SEGMENT.trim_start_matches('/')) {
+        Some(0) => &path[AUTH_SEGMENT.len() - 1..],
+        _ => path,
+    };
+    let project = project.trim_matches('/').trim_end_matches(".git");
+    (!project.is_empty()).then(|| project.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +201,54 @@ mod tests {
     fn derivation_round_trips_into_host_lookup() {
         let base = derive("ssh://me@gerrit.corp:29418/proj").unwrap();
         assert_eq!(host_of(&base).unwrap(), "gerrit.corp");
+    }
+
+    // --- project derivation -------------------------------------------------
+
+    #[test]
+    fn the_project_is_what_follows_the_auth_segment() {
+        assert_eq!(
+            project_of("https://gerrit.corp/a/platform/base").unwrap(),
+            "platform/base"
+        );
+    }
+
+    #[test]
+    fn a_remote_without_the_auth_segment_uses_its_whole_path() {
+        assert_eq!(
+            project_of("https://gerrit.corp/platform/base").unwrap(),
+            "platform/base"
+        );
+        assert_eq!(
+            project_of("ssh://me@gerrit.corp:29418/platform/base").unwrap(),
+            "platform/base"
+        );
+    }
+
+    #[test]
+    fn a_dot_git_suffix_is_stripped() {
+        assert_eq!(
+            project_of("https://gerrit.corp/a/tools.git").unwrap(),
+            "tools"
+        );
+        assert_eq!(project_of("ssh://gerrit.corp/tools.git").unwrap(), "tools");
+    }
+
+    /// A project whose own name starts with `a/` must not be mistaken for the
+    /// auth segment appearing mid-path.
+    #[test]
+    fn only_a_leading_auth_segment_is_stripped() {
+        assert_eq!(
+            project_of("https://gerrit.corp/team/a/thing").unwrap(),
+            "team/a/thing",
+            "the segment only marks the API when it leads the path"
+        );
+    }
+
+    #[test]
+    fn a_remote_with_no_project_yields_nothing() {
+        assert_eq!(project_of("https://gerrit.corp/"), None);
+        assert_eq!(project_of("https://gerrit.corp/a/"), None);
+        assert_eq!(project_of("git@gerrit.corp:proj.git"), None);
     }
 }

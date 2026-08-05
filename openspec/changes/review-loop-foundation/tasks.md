@@ -105,22 +105,30 @@
 
 ## 3. Workspace + patchset checkout (`review-workspace`)
 
-- [ ] 3.1 `remendo <change-id>` entrypoint. Require cwd inside a git clone;
+- [x] 3.1 `remendo <change-id>` entrypoint. Require cwd inside a git clone;
       error-and-exit on not-a-clone, on unknown/inaccessible change, and on a
       `project` mismatch between the change and the clone — the mismatch error
       names **both** values, per `config.yaml`'s error rule. All of this happens
       **before** any worktree is created.
-- [ ] 3.2 Create the worktree at `$XDG_STATE_HOME/remendo/<project>/<change-id>/`
+- [x] 3.2 Create the worktree under `$XDG_STATE_HOME/remendo/<project>/<change-id>/`
       (outside the clone, so it survives `git clean`); `git fetch` the revision
       ref and check it out into it. Never touch the user's real working tree.
       Note git still registers the worktree in the clone's `.git/worktrees/`, so
       a hand-deleted state dir needs `git worktree prune`.
-- [ ] 3.3 Relaunch onto an existing worktree is a **resume**: reuse it with its
+      **REFINED while building:** that directory is a *session* directory
+      holding `worktree/` and `verdicts.json`, not the worktree itself. The
+      cache must sit beside the checkout rather than inside it — anything inside
+      would appear as an untracked file in the change under review.
+      Project and change id are validated as path components before use: a
+      Gerrit project legitimately contains `/` and becomes nested directories,
+      but `..` must be impossible, since the project name arrives from a REST
+      response.
+- [x] 3.3 Relaunch onto an existing worktree is a **resume**: reuse it with its
       confirmed edits intact. Do not recreate, do not refuse — 3.4's abort path
       guarantees this is the common case, not an exceptional one.
-- [ ] 3.4 Abort path: leave the worktree + confirmed edits in place, push nothing,
+- [x] 3.4 Abort path: leave the worktree + confirmed edits in place, push nothing,
       report the worktree location.
-- [ ] 3.5 Verdict cache keyed by **(change id, revision)**, persisted beside the
+- [x] 3.5 Verdict cache keyed by **(change id, revision)**, persisted beside the
       worktree, holding verdict payloads and accumulated `total_cost_usd`. A
       revision change is a cache miss. Human triage decisions are deliberately
       NOT cached — cheap to redo, where verdicts cost money and re-roll

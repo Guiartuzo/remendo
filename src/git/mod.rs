@@ -15,7 +15,7 @@ pub mod fake;
 use std::path::{Path, PathBuf};
 
 pub use cli::GitCommand;
-pub use fake::FakeGit;
+pub use fake::{FakeGit, GitCall};
 
 /// A username/password pair from git's credential helper.
 ///
