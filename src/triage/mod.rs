@@ -51,10 +51,40 @@ pub struct TriageItem {
     /// The comment's prose after the user edited it, which is what feeds the
     /// apply turn.
     pub edited_prose: Option<String>,
-    /// The reply approved during triage for a rejected thread. `None` on a
-    /// rejected thread means the draft was declined, and a declined draft posts
-    /// nothing.
-    pub reply: Option<String>,
+    /// Where the reply to a rejected thread has got to.
+    pub reply: ReplyState,
+}
+
+/// A rejected thread's reply, through its three states.
+///
+/// Three, not two: a bare `Option<String>` conflates "not decided yet" with
+/// "decided against", and the reply pass then cannot tell whether to prompt.
+/// It re-offered a declined draft forever.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ReplyState {
+    /// Not yet answered. The reply pass still owes this thread a prompt.
+    #[default]
+    Pending,
+    /// Approved text, to be posted with `unresolved: true`.
+    Approved(String),
+    /// The draft was declined. Nothing is posted, and the thread is settled as
+    /// far as the reply pass is concerned.
+    Declined,
+}
+
+impl ReplyState {
+    /// The text to post, if any.
+    pub fn text(&self) -> Option<&str> {
+        match self {
+            ReplyState::Approved(text) => Some(text),
+            ReplyState::Pending | ReplyState::Declined => None,
+        }
+    }
+
+    /// Whether the reply pass still owes this thread a prompt.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, ReplyState::Pending)
+    }
 }
 
 impl TriageItem {
@@ -64,7 +94,7 @@ impl TriageItem {
             verdict,
             decision: None,
             edited_prose: None,
-            reply: None,
+            reply: ReplyState::Pending,
         }
     }
 
@@ -187,7 +217,15 @@ impl Triage {
     /// Approve a reply for a rejected thread.
     pub fn approve_reply(&mut self, index: usize, reply: impl Into<String>) {
         if let Some(item) = self.items.get_mut(index) {
-            item.reply = Some(reply.into());
+            item.reply = ReplyState::Approved(reply.into());
+        }
+    }
+
+    /// Decline the drafted reply for a rejected thread. Nothing is posted, and
+    /// the reply pass stops offering it.
+    pub fn decline_reply(&mut self, index: usize) {
+        if let Some(item) = self.items.get_mut(index) {
+            item.reply = ReplyState::Declined;
         }
     }
 
@@ -265,7 +303,7 @@ impl Triage {
             unreplied: self
                 .items
                 .iter()
-                .filter(|i| i.needs_reply() && i.reply.is_none())
+                .filter(|i| i.needs_reply() && i.reply.is_pending())
                 .count(),
         }
     }
@@ -281,7 +319,9 @@ impl Triage {
                 let fate = match item.decision {
                     Some(Decision::Accept) => Fate::Accepted,
                     Some(Decision::FixedByHand) => Fate::FixedByHand,
-                    Some(Decision::Reject) => Fate::Rejected { reply: item.reply },
+                    Some(Decision::Reject) => Fate::Rejected {
+                        reply: item.reply.text().map(str::to_string),
+                    },
                     Some(Decision::Defer) | None => Fate::Skipped,
                 };
                 TriagedThread {

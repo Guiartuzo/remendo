@@ -11,45 +11,40 @@ use ratatui::widgets::Paragraph;
 
 use crate::theme::Theme;
 
-/// Which feature the minibuffer is currently driving.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MiniMode {
-    Search,
-    GotoLine,
-    Files,
-}
-
-#[derive(Debug)]
+/// DIVERGENCE from vybim, which carried a `MiniMode` enum naming the feature
+/// the prompt was driving. That existed because vybim had no application-level
+/// mode to hold the answer; Remendo's `app::Mode` does, so a second copy here
+/// would be a state that could disagree with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Minibuffer {
-    /// The fixed label shown before the input (e.g. `/` or `Go to line: `).
+    /// The fixed label shown before the input (e.g. `Comment: `).
     prompt: String,
     /// The text the user has typed so far.
     pub input: String,
-    pub mode: MiniMode,
 }
 
 impl Minibuffer {
-    pub fn search() -> Self {
+    /// A prompt labelled `prompt`, starting empty.
+    ///
+    /// ```
+    /// # use remendo::minibuffer::Minibuffer;
+    /// let mut mini = Minibuffer::new("Comment: ");
+    /// mini.push('h');
+    /// assert_eq!(mini.input, "h");
+    /// ```
+    pub fn new(prompt: impl Into<String>) -> Self {
         Self {
-            prompt: "/".to_string(),
+            prompt: prompt.into(),
             input: String::new(),
-            mode: MiniMode::Search,
         }
     }
 
-    pub fn goto_line() -> Self {
+    /// A prompt pre-filled with text to edit, with the cursor past its end.
+    /// Editing a drafted reply starts from the draft, not from nothing.
+    pub fn editing(prompt: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
-            prompt: "Go to line: ".to_string(),
-            input: String::new(),
-            mode: MiniMode::GotoLine,
-        }
-    }
-
-    pub fn files() -> Self {
-        Self {
-            prompt: "> ".to_string(),
-            input: String::new(),
-            mode: MiniMode::Files,
+            prompt: prompt.into(),
+            input: text.into(),
         }
     }
 
@@ -59,6 +54,11 @@ impl Minibuffer {
 
     pub fn backspace(&mut self) {
         self.input.pop();
+    }
+
+    /// Whether anything has been typed.
+    pub fn is_empty(&self) -> bool {
+        self.input.trim().is_empty()
     }
 
     /// Draw `<prompt><input>` across `area` and return the screen column where
