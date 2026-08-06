@@ -8,6 +8,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# Creating the release needs write access to repository contents. Without this
+# the build succeeds and only the publish step fails, which is the worst place
+# to find out — the assets are built and then thrown away.
+permissions:
+  contents: write
+
 jobs:
   release:
     name: Release (${{ matrix.target_label }})
